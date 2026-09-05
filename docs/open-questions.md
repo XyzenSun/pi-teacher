@@ -80,7 +80,9 @@
 - `AGENTS.md` 机制：全局 `~/.pi/agent/AGENTS.md`（注意是 `agent/` 不是根 `.pi/`）+ 工作目录 `AGENTS.md`（注意是 cwd 本身，不是 `.pi/AGENTS.md`）作为系统提示词，不受压缩影响。**`@文件` 引用不存在于 AGENTS.md 内部**，它是 CLI 参数语法，不是文件 import。
 - SDK 支持通过 `SessionManager.create(cwd, sessionDir)` 自定义会话存储目录，JSONL 文件会平铺在 `sessionDir` 下，不再按 cwd 编码建子目录。
 - 同进程多实例安全，无全局状态冲突。
-- **延迟落盘**：首条 assistant 回复之前 JSONL 文件不存在，`pi_session_path` 需在首轮结束后回填。
+- **延迟落盘但路径提前确定**：文件名在 `SessionManager` 构造时生成（`<时间戳>_<sessionId>.jsonl`），`getSessionFile()` 是公开 getter，创建后立即可取；只有写盘动作延迟到首条 assistant 回复。所以 `pi_session_path` 不需要回填。核实于 v0.84.2。
+- `create(cwd, sessionDir, options)` 的 `options.id` 可自定义 sessionId（须匹配 `/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`），会进入文件名。
+- `open(path, sessionDir, cwdOverride)` 可完全自定义文件路径，但 sessionId 随机不可指定，且 `cwd` 需显式传第三参否则退化为 `process.cwd()`。传入 0 字节的已存在文件会让 header 当场落盘。
 
 ### Anki（已决定不集成，见 ADR-0008）
 

@@ -45,7 +45,11 @@ CREATE TABLE session (
 
 **work_path**：Pi 启动的工作目录，绝对路径。多个 Session 可以指向同一个 `work_path`。
 
-**pi_session_path**：Pi 的 JSONL 会话文件路径。通过 `SessionManager.create(workPath, workPath)` 配置后，文件直接存在 `work_path` 下，命名格式 `<ISO时间戳>_<uuidv7>.jsonl`。**注意延迟落盘**：首条 assistant 回复之前文件不存在，此字段在会话创建时为空，首轮结束后回填。`(work_path, pi_session_path)` 联合唯一。
+**pi_session_path**：Pi 的 JSONL 会话文件路径。通过 `SessionManager.create(workPath, workPath)` 配置后，文件直接存在 `work_path` 下，命名格式 `<ISO时间戳>_<sessionId>.jsonl`。`(work_path, pi_session_path)` 联合唯一。
+
+**不需要回填**。核实 Pi v0.84.2 源码：文件名在 `SessionManager` 构造函数里就生成好了（`newSession()` 里 `sessionId = options?.id ?? uuidv7()`，随后拼出 `sessionFile`），延迟的只是写盘动作——`_persist()` 检查已有条目中是否存在 assistant message，没有就继续在内存缓冲，首条 assistant 回复时用 `openSync(file, "wx")` 建文件并补写全部缓冲条目。`getSessionFile()` 是公开 getter，`create()` 返回后立即调用即可拿到绝对路径，官方 SDK 示例 `examples/sdk/11-sessions.ts` 就是这么用的。
+
+备选方案（暂不采用）：`SessionManager.open(path, undefined, cwd)` 可以完全自定义文件名。不采用是因为它不透传 `NewSessionOptions`，sessionId 变成随机值无法指定，且 `cwd` 必须显式传第三参否则退化为 `process.cwd()`。Pi 默认的时间戳前缀文件名本身就便于排序，没有改名的必要。
 
 **teach_style_id**：教学风格，外键。可空，空表示用默认风格。
 
