@@ -36,6 +36,10 @@
 | 行为倾向由提示词表达，硬约束由代码强制 | [ADR-0014](docs/adr/0014-prompt-injection-vs-code-constraints.md) |
 | 优先 Docker 部署，代码执行用远程沙箱 | [ADR-0015](docs/adr/0015-docker-first-remote-sandbox.md) |
 | 资料抓取交给子代理，隔离上下文污染 | [ADR-0016](docs/adr/0016-subagent-for-material-fetching.md) |
+| 卡片去重：精确匹配归代码，语义判断归模型 | [ADR-0017](docs/adr/0017-card-dedup-exact-in-code-semantic-in-model.md) |
+| 复习是一场批量对话，不是逐卡问答 | [ADR-0018](docs/adr/0018-review-is-batched-conversation.md) |
+| 模型直接输出四档 Rating，不经中间层归档 | [ADR-0019](docs/adr/0019-model-outputs-rating-directly.md) |
+| 彻底掌握的术语沉淀进数据库，成为全局用户模型 | [ADR-0020](docs/adr/0020-mastered-terms-graduate-into-database.md) |
 
 Schema 相关的决策不再单独立 ADR，直接维护在 [`数据库设计.md`](数据库设计.md) 里——它变动频繁，ADR 那种「一次决策一份记录」的形式跟不上。
 
