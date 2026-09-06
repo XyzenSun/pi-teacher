@@ -35,6 +35,7 @@
 | 制卡开关挂在对话上，用布尔而非三档 | [ADR-0013](docs/adr/0013-new-study-type-supersedes-0002.md) |
 | 行为倾向由提示词表达，硬约束由代码强制 | [ADR-0014](docs/adr/0014-prompt-injection-vs-code-constraints.md) |
 | 优先 Docker 部署，代码执行用远程沙箱 | [ADR-0015](docs/adr/0015-docker-first-remote-sandbox.md) |
+| 资料抓取交给子代理，隔离上下文污染 | [ADR-0016](docs/adr/0016-subagent-for-material-fetching.md) |
 
 Schema 相关的决策不再单独立 ADR，直接维护在 [`数据库设计.md`](数据库设计.md) 里——它变动频繁，ADR 那种「一次决策一份记录」的形式跟不上。
 
