@@ -2,17 +2,13 @@
 
 已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。本文只记录尚未拍板的事项。
 
-阻塞工具定义与提示词设计的问题已全部清空。剩下 4 条都在别的方向上：两条等技术栈介绍，一条等界面设计稿，一条等实现时验证。
+阻塞工具定义与提示词设计的问题已全部清空。技术栈已定（ADR-0024、ADR-0025），剩下 2 条：一条等实现时看真实 payload，一条等用户的界面设计稿。
 
 ## 真正未决
 
 1. **`context` 事件返回值的容器格式。** 通道已定（见 `pi-hook机制调研.md`），注入项也已定（待复习卡数、当前使命摘要、最近学习记录），但用什么标记包裹还没定。`<system-reminder>` 是 Pi 内部在用的标记，我们复用可能与它自己的注入撞车。需要在实现时看一次真实 payload 再定。
 
-2. **Web 后端框架**（Express / Fastify / Hono / Next.js API Routes）。用户对 Node 生态不熟，等一轮技术栈介绍后再定。注意：ADR-0024 定了子进程方案，pi-web 的进程内桥接层不再是「照抄」，Next.js 的绑定力度比原先估计的低。
-
-3. **前端框架**（React / Vue / Svelte）与状态管理。同上。pi-web 的前端（Markdown 管线、Mermaid 渲染、SSE 消费）仍可复用，那部分是 React。
-
-4. **卡片管理与复习界面的交互与布局。** 用户会提供参考图与参考 HTML。复习界面是对话窗口（见 ADR-0018），另需「自己刷卡」入口（见 ADR-0021）。
+2. **卡片管理与复习界面的交互与布局。** 用户会提供参考图与参考 HTML。复习界面是对话窗口（见 ADR-0018），另需「自己刷卡」入口（见 ADR-0021）。
 
 ## 实现时验证
 
@@ -21,8 +17,7 @@
 | 待验证 | 影响 | 出处 |
 | --- | --- | --- |
 | `fsrs-optimizer` 空输入是返回默认权重还是抛异常 | 若抛异常，接口层要捕获并提示「记录不足，参数未改变」 | ADR-0021 |
-| 一个 Pi 子进程的常驻内存 | 决定 WebUI 是否需要提示用户「工作区开太多了」 | ADR-0024 |
-| RPC 模式的长连接稳定性 | pi-web 没走这条路，此组合缺生产验证 | ADR-0024 |
+| Pi 0.84.2 与 pi-web 所依赖 0.84.3 的 8 项 API 漂移 | 移植桥接层时逐项核对，最关键 `preflightResult` 与 `agent_settled` | ADR-0024、`pi-web-研究/01-桥接层.md` 6.3 |
 
 ## 已在别处解决的
 
@@ -80,15 +75,17 @@
 
 | 问题 | 结论 | 出处 |
 | --- | --- | --- |
-| Pi 实例的进程模型 | 每工作区一个 `pi --mode rpc` 子进程，用 `--session-id` 启动，关闭即杀进程 | ADR-0024 |
+| Pi 实例的进程模型 | 所有 AgentSession 跑在后端宿主进程内（进程内 SDK），桥接层从 pi-web 移植到 Express；不 spawn 子进程 | ADR-0024 |
+| Web 后端框架 | Express 5。有状态后端不受任何框架惩罚，选资料最厚、概念最少的 | ADR-0025 |
+| 前端框架与构建 | React + TypeScript + Vite + Tailwind，状态管理用内置 hooks 不引库。pi-web 前端组件直接抄 | ADR-0025 |
 | Docker 基础镜像 | `node:22-slim`。alpine 只小 87MB，不值得换取 musl/BusyBox 差异 | ADR-0015 |
 | 镜像内的语言运行时 | 只有 Node.js，不装 Python。工具脚本用 Shell / Node / 预编译 Go 二进制 | ADR-0015 |
 | Go 工具怎么进镜像 | 独立仓库开发，GitHub Actions 交叉编译，本仓库只 `COPY` 二进制 | ADR-0015 |
-| SQLite 挂载 | 单独挂卷。多子进程并发访问，必须开 WAL | ADR-0015、ADR-0024 |
+| SQLite 挂载 | 单独挂卷。单进程访问，WAL 非硬前提但开着无害 | ADR-0015、ADR-0024 |
 | 用户认证 | 单用户账号密码，不做 OAuth，永远不做多用户、不预留 `tenant_id` | ADR-0022 |
 | 备份与导出 | 只做导出不做自动备份；在线导出打包 `~/pi-teacher/` 但不含 SQLite（需停容器手动复制） | ADR-0022 |
 | 手机端 | 不做 apkg、不做原生端。以后只是 WebUI 适配小屏，后端不改 | ADR-0022 |
-| Pi 事件流转 SSE | pi-web 有实现可参考，但子进程方案下事件订阅层要换成读 RPC 流 | ADR-0024 |
+| Pi 事件流转 SSE | pi-web 有实现，事件订阅层可原样抄 | ADR-0024 |
 | 沙箱选型 | 设计工具时再定 | — |
 
 ## 已核实的外部事实
@@ -107,7 +104,7 @@
 - SDK 两级都有 `dispose()`：`AgentSession.dispose()`（abort 全部工作、失效扩展上下文、退订事件、清理 WebSocket 资源）与 `AgentSessionRuntime.dispose()`（先发 `session_shutdown` 再调前者）。没有 `close()`。
 - `dispose()` 不 flush 会话文件——持久化在每条消息结束时已完成。
 - **`AgentSession.fork()` 原地变异内部状态**，fork 后 `inner.sessionId` 变成新 id，宿主必须立刻销毁旧 wrapper。
-- pi-web 走的是进程内 SDK 方案（`globalThis.__piSessions` 注册表 + 启动锁 + 10 分钟空闲回收），不 spawn pi CLI。官方文档也建议 Node 宿主直接用 SDK。我们仍选了子进程，理由见 ADR-0024。
+- pi-web 走的是进程内 SDK 方案（`globalThis.__piSessions` 注册表 + 启动锁 + 10 分钟空闲回收），不 spawn pi CLI。官方文档也建议 Node 宿主直接用 SDK。ADR-0024 最终采纳同一模型，并把 `globalThis` 补丁简化为模块级变量（那是 Next dev 热重载特有的坑）。
 - 一个空闲会话实例占多少内存：**pi-web 的代码与文档里都没有数字**，也没有会话数上限配置。
 
 ### Pi 的存储与注入机制（核实于 v0.84.2）

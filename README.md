@@ -43,7 +43,8 @@
 | 复习节奏交给模型与用户，代码不设限 | [ADR-0021](docs/adr/0021-review-pacing-left-to-model-and-user.md) |
 | 单用户、密码登录、导出不备份、手机端只做前端适配 | [ADR-0022](docs/adr/0022-single-user-password-export-mobile-web.md) |
 | 生图：不控预算、不重试、AI 主动提议 | [ADR-0023](docs/adr/0023-image-generation-no-budget-no-retry.md) |
-| 每工作区一个独立 Pi 子进程，不用进程内多会话 | [ADR-0024](docs/adr/0024-one-pi-process-per-workspace.md) |
+| Pi 会话跑在宿主进程内，桥接层从 pi-web 移植 | [ADR-0024](docs/adr/0024-in-process-pi-sessions.md) |
+| 技术栈：Express + React + Vite + Tailwind | [ADR-0025](docs/adr/0025-tech-stack-express-react-vite.md) |
 
 Schema 相关的决策不再单独立 ADR，直接维护在 [`数据库设计.md`](数据库设计.md) 里——它变动频繁，ADR 那种「一次决策一份记录」的形式跟不上。
 
