@@ -52,6 +52,15 @@
 - `agents_md` 四套预置模板正文：新学、新学不制卡、复习、助教
 - `teach_style` 预置风格正文
 
+## 全局 AGENTS.md 需要写进去的约束
+
+写正文时别漏了这几条环境事实，否则模型会伸手去拿不存在的东西：
+
+- **镜像内无 Python**。写脚本用 Shell 或 Node（`.mjs`）。见 ADR-0015。
+- `/bin/sh` 是 dash 不是 bash，脚本里要用 bashism 得显式指定 `#!/usr/bin/env bash`。
+- 资料存 `materials/`，索引在 `materials/index.md`，模型自读自写。
+- `glossary` 表存用户已掌握的术语，用数据库工具按需查。见 ADR-0020。
+
 ## 文档待同步
 
 正在派子代理审查全部旧文档，不一致清单将输出到 `docs/文档不一致清单.md`，由人工逐条决策后再改。
@@ -62,6 +71,17 @@
 - 难题清单数据结构：不建表，术语废弃（已从 open-questions 移入「已在别处解决的」）。
 
 其余待清单出来后决策。
+
+## Go 工具仓库（待建，等有实际需求再动）
+
+方案已定（见 ADR-0015）：独立仓库开发，GitHub Actions 交叉编译，本仓库只 `COPY` 二进制。
+
+现在还没有确定要用 Go 写的工具，所以不预建仓库。等出现第一个「Shell 太弱、Node 又不合适」的场景再说。届时需要：
+
+- 仓库骨架 + `go.mod`
+- Actions workflow：build matrix 出 `linux/amd64` 与 `linux/arm64`，产物挂 Release
+- 本仓库 Dockerfile 里按 `TARGETARCH` 选对应架构下载或 COPY
+- 约定版本号的记录位置，避免「镜像里那个二进制是哪个 commit 编的」说不清
 
 ## pi-web 代码移植（调研已完成）
 
