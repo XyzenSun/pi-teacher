@@ -66,7 +66,7 @@
 | 卡片提醒的默认轮次 | WebUI 后台直接暴露 hook 配置的 JSON 字段供用户改，不设「正确默认值」 | 本文 |
 | 多条提醒同时触发怎么合并 | 直接拼接两个 `<system-reminder>` 块，不做优先级与去重 | 本文 |
 | 生图预算与重试 | 不控预算（用户在 API 提供商侧设限）、不重试 | ADR-0023 |
-| 生图存哪 | `~/pi-teacher/llm-text-to-img/`，全局共用，由 skill/mcp 内部落盘 | ADR-0023 |
+| 生图存哪 | `~/pi-teacher/llm-text-to-img/`，全局共用，由 skill 内部落盘 | ADR-0023 |
 | 生图触发方式 | AI 主动提议，纯提示词，不做 hook | ADR-0023 |
 | Mermaid 渲染与失败回退 | pi-web 的 `MermaidBlock.tsx` 有现成实现 | `pi-web-研究/03a-Markdown管线.md` |
 | HTML 输出服务端渲染 | 首版不做 | — |

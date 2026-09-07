@@ -1,0 +1,10 @@
+# 密钥与环境（绝不入库）
+**/.env
+skills/*/**/.env
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# dev 验证数据（冒烟测试每次重建）
+tools-dev/server/dev-data/

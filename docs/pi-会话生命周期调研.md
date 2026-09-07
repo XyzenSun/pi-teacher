@@ -262,3 +262,41 @@ dispose() {
 - 若动机只是**省内存**（空闲工作区不占 RAM）→ 路径 C 即可：SDK 的 `dispose()` 链路完整（abort 全部工作、失效扩展上下文、退订事件、清理 WebSocket 资源），pi-web 已在生产验证「dispose 后从 jsonl 无损重开」。
 - pi-web 本身（官方生态内最成熟的 Pi 宿主）选择了进程内方案，且官方文档明确建议 Node.js 宿主不要 spawn 子进程（docs/rpc.md 第 5 行）——这是路径 B/C 的最强背书。
 - 无论哪条路：cwd 只能通过 spawn 选项（A）或 SDK `cwd` 参数（B/C）指定，`--session-dir`/`SessionManager` 第二参控制会话落盘位置；固定会话 id 需符合 `[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]` 格式（Q1.1）。
+
+---
+
+## Q5：消息级编辑能力（补充核实，2026-09-06）
+
+前端要在 AI 消息下加操作按钮，为此核实 Pi 的三个能力。结论先行：**删除单条消息不存在；回退有两层机制；「重新生成」是回退的组合用法。**
+
+### 删除单条消息：不存在
+
+`session-manager.d.ts` 第 279 行注释原文：**"change the leaf pointer. Entries cannot be modified or deleted."**——jsonl 是 append-only 树，任何「删掉 / 回退」都是移动 leaf 指针或 fork 分叉，旧条目永远留在文件里（与「压缩不删除旧条目」同源设计）。从用户视角的「删除」可以映射为 navigateTree：后续条目离开当前路径，文件里还在但界面上看不见。
+
+### 回退：两层机制
+
+**同文件内回退：`AgentSession.navigateTree(targetId, options)`**（agent-session.js 第 2306 行）。把 leaf 指针移到树中任意节点，会话文件不变。TUI 的双击 Esc 树选择器（`showTreeSelector`，interactive-mode.js 第 4182 行）就是它。返回值里的 `editorText`：目标若是用户消息，会把原文回填编辑器——正好做「编辑后重发」。
+
+`options.summarize` 是个宝藏选项：被放弃的分支可以让 AI 生成一条摘要条目（`BranchSummaryEntry`，可带 `label`）留在树里，重答时模型知道上一次为什么被丢弃。不想要就传 false，静默丢弃。
+
+**跨文件分叉：`fork(entryId)` / `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir)`**（session-manager.js 第 1234 行）。分叉出**新会话文件**，旧会话原样保留。TUI 的 `/fork`（`showUserMessageSelector`，第 4134 行，列出全部用户消息供选择）与 `/clone`（`handleCloneCommand`，第 4164 行，从叶子原样克隆）。
+
+### 重新生成最近回答：无一键命令，组合即得
+
+`navigateTree` 回到最近一条用户消息 → 重发原文（或改 `editorText` 后再发）。TUI 用户就是这个流程。RPC 命令面里**没有** regenerate、**也没有** navigate_tree（只有 fork / clone / get_tree / get_entries）——这层能力只有进程内 SDK 拿得到（ADR-0024 选对了）。
+
+### 对 pi-teacher 前端按钮的映射
+
+| 按钮意图 | 底层操作 |
+| --- | --- |
+| AI 消息下「重新生成」 | `navigateTree` 到上一条用户消息 + 重发 |
+| 用户消息下「编辑重发」 | `navigateTree` + `editorText` 回填输入框 |
+| 任意消息「回退到这里」 | `navigateTree(该节点)`，可选 `summarize` 开关 |
+| 「从这里另开分支」（可选） | `fork` 新会话——pi-web 走的就是这条（fork 后原地变异必须立刻销毁旧 wrapper），抄它只能抄到 fork 型 |
+
+倾向 navigateTree 型：一次 pi_session 一条 jsonl，回退不产生新对话行，与「pi_session = 一次对话」的模型一致。fork 留给「新旧两条路都想保留」的少数场景，首版可以不做。
+
+### 两条必须写进界面设计的约束
+
+1. **回退不回滚副作用。** `navigateTree` 只回退对话上下文，AI 已落盘的东西全在：essence 文件、learning-records、制的卡、提议的术语。回退到制卡之前，卡照样在待审批列表。这是 append-only 的必然代价，界面文案要让用户明白「回退只影响对话」。
+2. **会话历史是树不是线。** 前端要按「根到当前 leaf 的路径」渲染，默认只显示当前路径，被放弃分支收进分支切换器或隐藏。`session-reader.ts` 本就在必须重写的清单里（`todo.md`），树渲染是它的一部分。
