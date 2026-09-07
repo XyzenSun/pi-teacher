@@ -30,7 +30,7 @@
 
 | 需求 | 命令 |
 |---|---|
-| 搜最近一周新闻 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --topic news --time-range week` |
-| 搜指定日期之后内容 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --start-date 2026-01-01` |
-| 更深度搜索 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --search-depth advanced` |
-| 精确匹配短语 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "\"exact phrase\"" --exact-match` |
+| 搜最近一周新闻 | `./scripts/tavily-search search "query" --topic news --time-range week` |
+| 搜指定日期之后内容 | `./scripts/tavily-search search "query" --start-date 2026-01-01` |
+| 更深度搜索 | `./scripts/tavily-search search "query" --search-depth advanced` |
+| 精确匹配短语 | `./scripts/tavily-search search "\"exact phrase\"" --exact-match` |

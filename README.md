@@ -49,6 +49,7 @@
 | 学习对话可取卡判定，但提示词标记为反模式 | [ADR-0026](docs/adr/0026-review-tools-allowed-in-learn-sessions.md) |
 | 不用 MCP：能力扩展只有 skill 和插件两个载体 | [ADR-0027](docs/adr/0027-no-mcp-skill-and-extension-only.md) |
 | 不替换 Pi 的默认系统提示词，角色塑造走 AGENTS.md | [ADR-0028](docs/adr/0028-keep-default-system-prompt.md) |
+| 用户资源目录：AGENTS.md/USER.md 在 `~/pi-teacher/`，skills 全局注册，目录挂载不卷 | [ADR-0029](docs/adr/0029-user-resource-locations-and-mounting.md) |
 
 Schema 相关的决策不再单独立 ADR，直接维护在 [`数据库设计.md`](数据库设计.md) 里——它变动频繁，ADR 那种「一次决策一份记录」的形式跟不上。
 

@@ -116,7 +116,7 @@
 - 会话头部没有自由 metadata 字段槽位，自定义业务数据需走自定义条目通道。
 - **`context` 事件**：每次 LLM 调用前触发，返回值只进请求 payload，不写 jsonl、不受压缩影响，是每轮动态注入的正规通道。`before_agent_start` 注入的 `role: "custom"` 消息会落盘且参与压缩，不适合此用途。
 - 自动压缩可配置触发阈值与保留窗口，压缩产物是追加的条目，原始消息保留。
-- `AGENTS.md` 机制：全局 `~/.pi/agent/AGENTS.md`（是 `agent/` 不是根 `.pi/`）+ 工作目录 `AGENTS.md`（是 cwd 本身，不是 `.pi/AGENTS.md`）。不受压缩影响。**`@文件` 引用不存在于 AGENTS.md 内部**，它是 CLI 参数语法，不是文件 import。
+- `AGENTS.md` 机制：全局 `~/.pi/agent/AGENTS.md`（是 `agent/` 不是根 `.pi/`）+ **从文件系统根到 cwd 的全部祖先目录**各取一个（`resource-loader.js:93-105` 向上遍历，不在 git 根停止；同目录按 `AGENTS.override.md` > `AGENTS.md` > `AGENTS.MD` > `CLAUDE.md` > `CLAUDE.MD` 取第一个，小写 `agents.md` 不认）。全部拼接注入 `<project_context>`，不互相覆盖。不受压缩影响。**`@文件` 引用不存在于 AGENTS.md 内部**，它是 CLI 参数语法，不是文件 import。skills 全局目录 `~/.pi/agent/skills/`，同名冲突项目胜全局。
 - `SessionManager.create(cwd, sessionDir)` 可自定义会话存储目录，JSONL 平铺在 `sessionDir` 下。
 - **延迟落盘但路径提前确定**：文件名在构造时生成（`<时间戳>_<sessionId>.jsonl`），`getSessionFile()` 创建后立即可取，写盘动作延迟到首条 assistant 回复。所以路径不需要回填。
 - `create(cwd, sessionDir, options)` 的 `options.id` 可自定义 sessionId，会进入文件名。

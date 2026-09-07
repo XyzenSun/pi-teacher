@@ -19,17 +19,17 @@
 只查官方文档：
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --include-domain docs.example.com
+./scripts/tavily-search search "query" --include-domain docs.example.com
 ```
 
 排除低质量来源：
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --exclude-domain example.com
+./scripts/tavily-search search "query" --exclude-domain example.com
 ```
 
 获取正文和来源图标：
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --include-raw-content markdown --include-favicon
+./scripts/tavily-search search "query" --include-raw-content markdown --include-favicon
 ```

@@ -17,12 +17,12 @@
 
 | 命令 | 用途 |
 |---|---|
-| `${CLAUDE_SKILL_DIR}/scripts/tavily-search --help` | 查看顶层帮助 |
-| `${CLAUDE_SKILL_DIR}/scripts/tavily-search search --help` | 查看 search 子命令全部参数 |
+| `./scripts/tavily-search --help` | 查看顶层帮助 |
+| `./scripts/tavily-search search --help` | 查看 search 子命令全部参数 |
 
 ## JSON 示例
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --json
-${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --pretty
+./scripts/tavily-search search "query" --json
+./scripts/tavily-search search "query" --pretty
 ```

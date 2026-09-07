@@ -1,31 +1,42 @@
 ---
 name: tavily-search
 description: 使用tavily进行搜索，Tavily搜索的特点为：返回内容较完整、结果较杂乱(信源混合官方页面、博客、论坛和二手文章)。 适合搜索新闻、一般事实、初步资料收集。当环境中有其他搜索工具时，应结合搜索工具的特点使用及用户要求。当需要网络搜索时，可考虑调用此SKiLL
-allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/tavily-search *)
+allowed-tools: Bash(./scripts/tavily-search *)
 ---
 
 # Tavily Search
 
-使用 `${CLAUDE_SKILL_DIR}/scripts/tavily-search` 调用 Tavily Search API。默认输出 Markdown，适合快速获取搜索结果、答案摘要和可引用来源。
+使用 `./scripts/tavily-search` 调用 Tavily Search API。
+
+> 上述相对路径以本 skill 目录为基准（`~/pi-teacher/skills/` 挂载于 `~/.pi/agent/skills/`），
+> 换成解析后的绝对路径执行。
+
+## 密钥配置
+
+密钥从 `~/pi-teacher/.env` 读取（`TAVILY_API_KEY` / `TAVILY_BASE_URL` / `TAVILY_TIMEOUT`）。
+首次调用前先确认该文件存在；不存在或缺失 key 时，把问题报告给用户，不要尝试其他路径。
+命令统一带 `--env-file ~/pi-teacher/.env` 参数（环境变量已注入时它会自动让位，两者兼容）。
+
+默认输出 Markdown，适合快速获取搜索结果、答案摘要和可引用来源。
 
 ## CLI 怎么用
 
 | 需求 | 命令 | 说明 |
 |---|---|---|
-| 查看帮助 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search --help` | 查看顶层命令与 search 子命令 |
-| 普通联网搜索 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query"` | 默认 Markdown 输出 |
-| 控制结果数量 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --max-results 5` | 默认 `5` |
-| 搜索并返回简短答案 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --include-answer basic` | 需要 Tavily 同时生成 answer 时用 |
-| 搜索并返回更完整答案 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --include-answer advanced` | 需要更完整 answer 时用 |
-| 搜新闻 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --topic news` | 新闻、近期事件、舆情时用 |
-| 限定最近时间 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --time-range week` | 支持 `day`、`week`、`month`、`year` |
-| 获取网页原文 | `${CLAUDE_SKILL_DIR}/scripts/tavily-search search "query" --include-raw-content markdown` | 需要摘录、核验、总结页面正文时用；内容可能很长 |
+| 查看帮助 | `./scripts/tavily-search --help` | 查看顶层命令与 search 子命令 |
+| 普通联网搜索 | `./scripts/tavily-search search "query"` | 默认 Markdown 输出 |
+| 控制结果数量 | `./scripts/tavily-search search "query" --max-results 5` | 默认 `5` |
+| 搜索并返回简短答案 | `./scripts/tavily-search search "query" --include-answer basic` | 需要 Tavily 同时生成 answer 时用 |
+| 搜索并返回更完整答案 | `./scripts/tavily-search search "query" --include-answer advanced` | 需要更完整 answer 时用 |
+| 搜新闻 | `./scripts/tavily-search search "query" --topic news` | 新闻、近期事件、舆情时用 |
+| 限定最近时间 | `./scripts/tavily-search search "query" --time-range week` | 支持 `day`、`week`、`month`、`year` |
+| 获取网页原文 | `./scripts/tavily-search search "query" --include-raw-content markdown` | 需要摘录、核验、总结页面正文时用；内容可能很长 |
 
 ## 基础高频参数
 
 | 参数 | 示例 | 何时使用 | 注意事项 |
 |---|---|---|---|
-| `--env-file <path>` | `--env-file ${CLAUDE_SKILL_DIR}/.env` | 需要显式指定配置文件位置时 | 默认读取 skill 目录 `.env`，通常不用传 |
+| `--env-file <path>` | `--env-file ~/pi-teacher/.env` | 需要显式指定配置文件位置时 | 密钥统一在 `~/pi-teacher/.env`，搜索前先确认该文件存在（见下「密钥配置」） |
 | `--max-results <n>` | `--max-results 5` | 控制返回数量 | 默认 `5` |
 | `--include-answer <mode>` | `--include-answer basic` | 需要 Tavily 直接给答案 | 常用 `basic` 或 `advanced` |
 | `--topic news` | `--topic news` | 新闻、近期事件、舆情 | 普通网页搜索不用加 |
