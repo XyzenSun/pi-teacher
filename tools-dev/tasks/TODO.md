@@ -1,8 +1,17 @@
 # TODO
 
-## 当前状态：后端宿主完成，tools-dev 冻结
+## 当前状态：后端宿主完成，下一任务为前端 WebUI（待对齐）
 
-**backend-host-mvp 已完成**（2026-09-08 验收）：Express + 桥接层 + 会话管理 + 投影/注入 + CRUD 路由 + scrypt 认证全部落地在仓库根 `server/`。验证面：smoke 74/74、run-real 真模型 7/7、http-smoke 真模型全链路 51/51、lifecycle 空闲回收 + SIGTERM 7/7、typecheck 零错误。tools-dev 冻结为历史脚手架，活跃代码在 `../server/`（见 CLAUDE.md 冻结注记）。
+**backend-host-mvp 已完成**（2026-09-08 验收，commit 4006891 已推送）：Express + 桥接层 + 会话管理 + 投影/注入 + CRUD 路由 + scrypt 认证全部落地在仓库根 `server/`。验证面：smoke 74/74、run-real 真模型 7/7、http-smoke 真模型全链路 51/51、lifecycle 空闲回收 + SIGTERM 7/7、typecheck 零错误。tools-dev 冻结为历史脚手架，活跃代码在 `../server/`（见 CLAUDE.md 冻结注记）。
+
+**下一任务：前端 WebUI**（已开任务，**需求尚未对齐**）。按流程先调 `grill-doc` 与用户对齐，对齐后写 PRD 到 `tasks/frontend-webui-mvp.md` 并更新本文件。前端可直接依赖的后端事实（http-smoke 已全量验证）：
+
+- 认证：`GET /api/auth/status`（needs-setup 决定进设密码页/登录页）、`POST /api/auth/setup`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`；cookie `pi_teacher_session`（HttpOnly + SameSite=Lax，7 天）
+- 提示词库：`GET/POST /api/prompts`、`PATCH/DELETE /api/prompts/agents-md/:id`、`POST /api/prompts/teach-style`（agents_md.type ∈ {ta, learn, review}，与会话类型匹配，被 pi_session 引用拒删 409）
+- 工作区：`GET/POST /api/workspaces`（列表含 dueCards 数）
+- 对话：`GET/POST /api/conversations`、`GET /api/conversations/:key/context`（:key = encodeURIComponent(jsonl 路径)，jsonl 路径即对话 id）、`POST .../command`（prompt/abort/get_state/get_tools 等 15 命令）、`GET .../events`（SSE：connected/message_start/message_update/prompt_done/agent_settled，注释帧 + 30s 心跳）、`POST .../close`
+- 卡片/术语/主题：`GET /api/cards?status=`、`POST /api/cards/:id/confirm|reject|delete|restore`、`PATCH /api/cards/:id`、`POST /api/cards/merge`、`GET /api/glossary`、`POST /api/glossary/:id/confirm|reject`、`GET/PATCH /api/topics/:id`（requestRetention ∈ [0.5,0.99]，maximumInterval ≥ 1 整数）
+- 会话失效约定：会话被空闲回收后 command/events 返回 404，前端引导重新打开对话（不自动重开）
 
 ## 已完成任务
 
@@ -38,5 +47,4 @@
 
 ## 待做（下一阶段候选，未排期）
 
-- 前端 WebUI（登录页已有语义，落地待排期）
 - 沙箱插件、生图 skill
