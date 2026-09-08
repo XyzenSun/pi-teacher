@@ -1,17 +1,20 @@
 # TODO
 
-## 当前状态：后端宿主完成，下一任务为前端 WebUI（待对齐）
+## 当前状态：后端宿主完成，前端 WebUI PRD 待用户审查
 
 **backend-host-mvp 已完成**（2026-09-08 验收，commit 4006891 已推送）：Express + 桥接层 + 会话管理 + 投影/注入 + CRUD 路由 + scrypt 认证全部落地在仓库根 `server/`。验证面：smoke 74/74、run-real 真模型 7/7、http-smoke 真模型全链路 51/51、lifecycle 空闲回收 + SIGTERM 7/7、typecheck 零错误。tools-dev 冻结为历史脚手架，活跃代码在 `../server/`（见 CLAUDE.md 冻结注记）。
 
-**下一任务：前端 WebUI**（已开任务，**需求尚未对齐**）。按流程先调 `grill-doc` 与用户对齐，对齐后写 PRD 到 `tasks/frontend-webui-mvp.md` 并更新本文件。前端可直接依赖的后端事实（http-smoke 已全量验证）：
+**下一任务：前端 WebUI**。需求已通过 `grill-doc` 收敛，完整 PRD 已写入 `tasks/frontend-webui-mvp.md`，当前等待用户审查，尚未开始实现。用户审查通过前不修改 `server/` 或创建 `web/` 代码。
 
-- 认证：`GET /api/auth/status`（needs-setup 决定进设密码页/登录页）、`POST /api/auth/setup`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`；cookie `pi_teacher_session`（HttpOnly + SameSite=Lax，7 天）
-- 提示词库：`GET/POST /api/prompts`、`PATCH/DELETE /api/prompts/agents-md/:id`、`POST /api/prompts/teach-style`（agents_md.type ∈ {ta, learn, review}，与会话类型匹配，被 pi_session 引用拒删 409）
-- 工作区：`GET/POST /api/workspaces`（列表含 dueCards 数）
-- 对话：`GET/POST /api/conversations`、`GET /api/conversations/:key/context`（:key = encodeURIComponent(jsonl 路径)，jsonl 路径即对话 id）、`POST .../command`（prompt/abort/get_state/get_tools 等 15 命令）、`GET .../events`（SSE：connected/message_start/message_update/prompt_done/agent_settled，注释帧 + 30s 心跳）、`POST .../close`
-- 卡片/术语/主题：`GET /api/cards?status=`、`POST /api/cards/:id/confirm|reject|delete|restore`、`PATCH /api/cards/:id`、`POST /api/cards/merge`、`GET /api/glossary`、`POST /api/glossary/:id/confirm|reject`、`GET/PATCH /api/topics/:id`（requestRetention ∈ [0.5,0.99]，maximumInterval ≥ 1 整数）
-- 会话失效约定：会话被空闲回收后 command/events 返回 404，前端引导重新打开对话（不自动重开）
+本任务的已确认范围：
+
+- 领域模型重建为 `space → pi_session`；删除 `session` 表和 `pi_session.session_id`；每条 Pi Session 独占 `work_path`；固定 `ta` / `review` Space，固定且唯一的 ta Pi Session；
+- WebUI 使用 React + TypeScript + Vite + Tailwind + `react-router-dom`，状态管理只用 React hooks/context；视觉与布局以 Atelier Mind 模板为准；本阶段先跑通桌面版，移动端另立任务；
+- 左侧展示 `Space → Pi Session` 两级树，助教仅从右侧固定入口复用；主区实现真实 SSE 对话；右侧实现全局 Card Proposal 与一次性上下文注入的固定助教；
+- 管理面板首版包含 Card、Glossary、Topic、Agents Md、Teach Style 的真实 CRUD/编辑；不使用模板假数据伪装功能；
+- 后端同步补齐破坏性 Schema 重建、独立工作目录、附件上传/下载/文件索引、模型查询/切换和 SPA 静态服务；
+- 不实现 Pi Session 级应用文件沙箱；制卡、复习写入等角色差异由工具控制层强制，Docker 与既有远程沙箱 skill 负责部署/执行隔离；
+- 原有 backend-host-mvp API 记录仅作历史参考，新实现必须以 PRD 和重建后的后端契约为准。
 
 ## 已完成任务
 

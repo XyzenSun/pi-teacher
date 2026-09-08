@@ -10,7 +10,7 @@ skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注
 | --- | --- | --- |
 | 全局 AGENTS.md | `~/pi-teacher/AGENTS.md` | 祖先遍历让它在三个工作区全部自动注入（机制见下），业务资产不进系统层 |
 | 全局 USER.md | `~/pi-teacher/USER.md` | Pi 无原生 USER.md 机制，注入靠 AGENTS.md 引导句；放业务根与 materials/ 同层 |
-| 会话模板投影 | 各工作区 cwd（如 `learn/5/AGENTS.md`） | 沿用数据库设计.md 的「agents_md 库投影」不变 |
+| 会话模板投影 | 各 Pi Session 的 `work_path`（如 `learn/2/pi/42/AGENTS.md`） | 沿用数据库设计.md 的 `agents_md` 投影约定；每个 Pi Session 独立投影 |
 | skills | `~/.pi/agent/skills/` | Pi 全局 skill 目录（机制见下），部署时目录挂载 |
 | 密钥 `.env` | `~/pi-teacher/.env` | 不随 skill 分发、不进镜像；env > .env，启动时单向同步 |
 
@@ -27,14 +27,14 @@ skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注
 ### AGENTS.md 注入机制
 
 - 候选文件名（每目录按序取第一个存在的）：`AGENTS.override.md`、`AGENTS.md`、`AGENTS.MD`、`CLAUDE.md`、`CLAUDE.MD`。**小写 `agents.md` 不被识别**
-- 加载范围：全局 `~/.pi/agent/AGENTS.md` 最前，然后从文件系统根向下到 cwd 的**全部祖先目录**（`resource-loader.js:93-105` 的 while 循环，不在 git 根停止）——所以 `~/pi-teacher/AGENTS.md` 对 `learn/5/`、`review/`、`ta/` 三个工作区全部生效
+- 加载范围：全局 `~/.pi/agent/AGENTS.md` 最前，然后从文件系统根向下到 cwd 的**全部祖先目录**（`resource-loader.js:93-105` 的 while 循环，不在 git 根停止）。`~/pi-teacher/AGENTS.md` 对所有 Pi Session 生效，当前 Pi Session 的 `work_path/AGENTS.md` 提供本次对话模板。
 - 注入形态：所有 context 文件按序拼接进 system prompt 的 `<project_context>` 块，**不互相覆盖**；越靠近 cwd 越靠后（工作区模板在全局规则之后，符合「全局打底、模板具体化」）
-- 关联约束：`SessionManager.create(cwd, ...)` 的 cwd 决定祖先遍历起点——将来后端创建会话时必须传工作区目录，不能让 cwd 退化为进程启动目录
+- 关联约束：`SessionManager.create(cwd, ...)` 的 cwd 决定祖先遍历起点——后端必须传当前 Pi Session 的 `work_path`，不能让 cwd 退化为进程启动目录
 - `~/.pi/agent/` 是系统层（settings/models/sessions/trust 归 Pi 框架管辖），不放业务文件
 
 ### USER.md：无原生机制
 
-Pi 不存在 USER.md / user memory 概念（全源码关键词零命中）。它是纯业务文件，生效完全靠 AGENTS.md 里的引导句（「会话开始时先读两份 USER.md，冲突以工作区级为准」——见 `提示词设计/全局提示词.md`）。放 `~/.pi/agent/` 无任何增益。
+Pi 不存在 USER.md / user memory 概念（全源码关键词零命中）。它是纯业务文件，生效完全靠 AGENTS.md 里的引导句（「会话开始时先读全局 USER.md 与当前 Pi Session 的 USER.md，冲突以 Pi Session 级为准」——见 `提示词设计/全局提示词.md`）。放 `~/.pi/agent/` 无任何增益。
 
 ## 部署约定
 

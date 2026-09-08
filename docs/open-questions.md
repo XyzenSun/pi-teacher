@@ -1,27 +1,61 @@
 # 未决问题
 
-已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。本文只记录尚未拍板的事项。
+已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。本文只记录尚未拍板的事项。已确认但尚未实现的架构重构，见 ADR-0030。
 
-阻塞工具定义与提示词设计的问题已全部清空。技术栈已定（ADR-0024、ADR-0025），剩下 2 条：一条等实现时看真实 payload，一条等用户的界面设计稿。
+## 当前前端 WebUI 未决
 
-## 真正未决
+以下问题属于前端 WebUI MVP，布局与视觉风格以 `/workspace/pi-teacher/前端模板` 为准；模板没有后端能力的按钮不做假功能。
 
-1. **`context` 事件返回值的容器格式。** 通道已定（见 `pi-hook机制调研.md`），注入项也已定（待复习卡数、当前使命摘要、最近学习记录），但用什么标记包裹还没定。`<system-reminder>` 是 Pi 内部在用的标记，我们复用可能与它自己的注入撞车。需要在实现时看一次真实 payload 再定。
+暂无用户层面的未决问题。已确认：一体化管理面板的 Card 编辑、回收站、Topic FSRS 参数编辑全部进入首版；附件保存到当前 Pi Session 的 `work_path/attachments/`；不增加 Pi Session 级应用文件权限限制，Docker 与远程沙箱 skill 负责部署/执行隔离。
 
-2. **卡片管理与复习界面的交互与布局。** 用户会提供参考图与参考 HTML。复习界面是对话窗口（见 ADR-0018），另需「自己刷卡」入口（见 ADR-0021）。
+## 当前数据模型重构的实现未决
 
-## 实现时验证
+暂无用户层面的未决问题。已确认：初始化时创建固定助教 Pi Session；`space.type` 与 `agents_md.type` 必须匹配；`review_topic_id` 仅允许出现在 `review` Space 的 Pi Session；初始助教模板见 `提示词设计/提示词模板/agentsmd/助教.md`。
 
-不阻塞设计，但实现到那一步要跑一次确认。
+## 真正未决的底层问题
 
-| 待验证 | 影响 | 出处 |
+4. **`context` 事件返回值的容器格式。** 通道已定（见 `pi-hook机制调研.md`），注入项也已定（待复习卡数、当前使命摘要、最近学习记录），但用什么标记包裹还没定。`<system-reminder>` 是 Pi 内部在用的标记，复用可能与它自己的注入撞车。需要在实现时看一次真实 payload 再定。
+
+5. **FSRS optimizer 空输入行为。** `fsrs-optimizer` 空输入是返回默认权重还是抛异常，需在实现时验证；若抛异常，接口层捕获并提示“记录不足，参数未改变”。
+
+6. **Pi 0.84.2 与 pi-web 0.84.3 的 API 漂移。** 移植前端依赖的 bridge 类型/事件消费时逐项核对；最关键是 `preflightResult` 与 `agent_settled`。
+
+## 已确认的决策
+
+### 领域与数据
+
+| 问题 | 结论 | 出处 |
 | --- | --- | --- |
-| `fsrs-optimizer` 空输入是返回默认权重还是抛异常 | 若抛异常，接口层要捕获并提示「记录不足，参数未改变」 | ADR-0021 |
-| Pi 0.84.2 与 pi-web 所依赖 0.84.3 的 8 项 API 漂移 | 移植桥接层时逐项核对，最关键 `preflightResult` 与 `agent_settled` | ADR-0024、`pi-web-研究/01-桥接层.md` 6.3 |
+| 容器模型 | `space` 是唯一收纳容器；删除 `session` 表；`pi_session.space_id` 是唯一父级；每个 Pi Session 自有 `work_path` | ADR-0030 |
+| 复习容器 | `space.id = 1`、`type = 'review'` 的全局固定复习 Space；允许多个复习 Pi Session；复习 Space 左侧展示 Topic 快捷入口与历史对话 | ADR-0030、本次对齐 |
+| 助教容器 | `space.id = 0`、`type = 'ta'` 的全局固定助教 Space；schema 初始化时直接创建唯一固定 Pi Session 与目录；不可创建 | ADR-0030、本次对齐 |
+| 固定 Space 可编辑性 | `ta` / `review` 的名称、类型和身份不可修改、不可删除；学习 Space 可重命名和删除；Pi Session 不跨 Space 移动 | 本次对齐 |
+| 旧数据 | 项目未上线，破坏性重建数据库，不提供旧数据迁移；同步重做验证脚本 | 本次对齐 |
+| 卡片与复习的关系 | Card 全局归属 Topic，不归属 Space 或 Pi Session；复习是批量对话 | ADR-0010、ADR-0018 |
+| Pi Session 提示词归属 | Agents Md、Teach Style、制卡开关属于 Pi Session，不属于 Space | ADR-0010、ADR-0013 |
+| 文件访问边界 | 不做 Pi Session 级应用权限限制；Docker 是部署隔离边界，远程沙箱由独立 skill 负责；角色业务权限由工具控制层强制 | 本次对齐 |
+| 后端/业务存储 | Pi 对话 JSONL 与业务 SQLite 物理分离 | ADR-0004 |
 
-## 已在别处解决的
+### 前端与产品方向
 
-以下问题曾列在本文，现已有答案，记录出处避免重复讨论。
+| 问题 | 结论 | 出处 |
+| --- | --- | --- |
+| MVP 功能面 | 认证、Space/Pi Session、主对话、固定助教、Card 审批与卡库、Glossary、Topic、提示词库；没有后端能力的日历、语音、知识图谱等不做假功能 | 本次对齐 |
+| 左侧层级 | 两级可折叠树：`Space → Pi Session`；助教不出现在左侧，唯一入口是右侧栏下方固定助教 | 本次对齐 |
+| 点击 Space | 只展开/收起，不自动打开 Pi Session | 本次对齐 |
+| 复习 Space 展开 | 展示 Topic 快捷入口与历史复习 Pi Session；Topic 点击打开新建复习 Pi Session 面板并预选 `review_topic_id` | 本次对齐 |
+| 新建入口 | 学习/复习 Space 的 `+` 直接打开对应类型面板；第三个入口是全局新建入口，打开通用面板并由用户选择学习或复习；手动建 Card 放在 Card 管理页 | 本次对齐 |
+| 新建默认值 | `enable_make_card = true`；教学风格可为空；Topic 有“全部”；创建成功立即进入对话；助教不可创建 | 本次对齐 |
+| 右侧待审卡片 | 全局 `proposed` 池，支持 Topic 筛选；不声称卡片来自当前对话 | 本次对齐 |
+| 助教上下文 | 仅用户点击“一次性发送并注入当前主会话简介”按钮时注入，不自动注入 | 本次对齐 |
+| SSE 消费 | reducer + 原生 `EventSource` 被动重连；连接后 GET context 权威同步；404 引导重新打开，不自动创建 | 本次对齐 |
+| 认证页 | Atelier Mind 风格的全屏背景与简洁认证卡，不使用三栏工作台 | 本次对齐 |
+| 对话能力 | Markdown + KaTeX + Mermaid、思维块、工具调用折叠、超长消息降级、历史懒加载、IME 输入保护、草稿恢复、图片附件、`@` 文件引用、斜杠命令、steer/follow-up、移动端键盘适配 | 本次对齐 |
+| 附件 | 属于本次 MVP；上传保存到当前 Pi Session 的 `work_path/attachments/`，后端补上传接口 | 本次对齐 |
+| SPA 工程 | React Router；Vite `/api` proxy；生产 Express serve `web/dist` + SPA fallback | 本次对齐 |
+| 模型 | 增加模型查询/切换 API，模型选择器通过 `set_model` 修改当前 Pi Session | 本次对齐 |
+| 管理入口 | 左下角设置打开一体化设置面板，在同一页面切换 Card、Glossary、Topic、Agents Md、Teach Style 子类；Card 编辑、回收站、Topic FSRS 参数编辑全部进入首版 | 本次对齐 |
+| 助教 URL | 使用稳定的 `pi_session.id` 作为前端身份，不暴露绝对路径，不使用临时 UUID | 本次对齐 |
 
 ### 卡片与复习
 
@@ -36,106 +70,30 @@
 | FSRS 训练的最少记录数 | 不设门槛，0 条也允许调用——记录不足时优化器本身不会改变权重 | ADR-0021 |
 | 卡片表字段 | 6 个字段 + `status` 三态，无 `answer_mode` 与 `metadata` | `数据库设计.md` |
 | 卡片溯源 | 不存消息 id 与对话外键，靠 `reason_and_remark` | ADR-0010 |
-| 卡片提议确认 UI | 批量确认与零星确认共用同一套交互 | — |
+| 卡片提议确认 UI | 批量确认与零星确认共用同一套交互 | 原对齐结论 |
 | 合并卡的判据与实现 | 纯提示词约束触发时机 + 合并工具做实际合并与 FSRS 状态更新，不让 AI 算 | `todo.md` |
-| 难题清单数据结构 | 不建表，Sticking Point 术语废弃 | ADR-0009 |
 | 是否集成 Anki | 不集成 | ADR-0008 |
 
-### 上下文与工作区
+### 全局资源与提示词
 
 | 问题 | 结论 | 出处 |
 | --- | --- | --- |
-| 工作目录组织方式 | `~/pi-teacher/learn/<session_id>/` | `数据库设计.md` |
 | 每轮动态注入机制 | Pi 的 `context` 事件，不落盘、不受压缩 | `pi-hook机制调研.md` |
-| 历次对话摘要如何分层 | 不做。只用 Pi 的自动压缩，靠 `learning-records/`、`USER.md`、`MISSION.md`、术语表推断学习情况 | 本文 |
 | 已掌握术语怎么给模型 | 不注入，`USER.md` 里写引导，AI 自主决定何时用数据库工具查 | ADR-0020 |
-| AGENTS.md 生成时机 | 新开对话时从 `agents_md` 表整份覆盖写出 | `数据库设计.md` |
-| `review/AGENTS.md` 从哪来 | 与学习、助教统一：开对话时从模板投影。`agents_md` 加 `type` 字段供 WebUI 筛选 | `数据库设计.md` |
-| 资料存哪、索引格式 | 全局 `materials/`，索引是 `index.md` 普通 Markdown，模型自读自写，不做程序解析 | `数据库设计.md` |
+| AGENTS.md 生成时机 | 新开 Pi Session 时从 `agents_md` 表整份投影到该 Pi Session 的 `work_path` | ADR-0030 |
+| Pi Session 工作目录 | `learn/<space-id>/pi/<pi-session-id>/`、`review/pi/<pi-session-id>/`、`ta/pi/<pi-session-id>/`；JSONL 平铺在 Pi Session 目录根部 | ADR-0030 |
+| 资料存哪、索引格式 | 全局 `materials/`，索引是 `index.md` 普通 Markdown，模型自读自写 | `数据库设计.md` |
 | 资料抓取的上下文污染 | 交给子代理，`inheritContext: false` | ADR-0016 |
-| 视频转文本、网页抓取服务 | 后续由 skill 接第三方实现；视频下载用 yt-dlp，网页抓取用用户已有工具 | `todo.md` |
-| 学习计划 | 由 `MISSION.md` 承担，不做「每天学什么」的拆分 | `todo.md` |
-| 对话标题生成 | 后端独立 LLM 调用，prompt 为「总结下面的内容，生成一个 20 字以内的标题」 | `数据库设计.md` |
-| 助教会话压缩参数 | 保持 Pi 默认 | — |
-| Pi 会话存储格式 | JSONL + 自定义 `sessionDir` 指向工作目录 | `数据库设计.md` |
-
-### 提醒与生成内容
-
-| 问题 | 结论 | 出处 |
-| --- | --- | --- |
-| 卡片提醒的默认轮次 | WebUI 后台直接暴露 hook 配置的 JSON 字段供用户改，不设「正确默认值」 | 本文 |
-| 多条提醒同时触发怎么合并 | 直接拼接两个 `<system-reminder>` 块，不做优先级与去重 | 本文 |
-| 生图预算与重试 | 不控预算（用户在 API 提供商侧设限）、不重试 | ADR-0023 |
-| 生图存哪 | `~/pi-teacher/llm-text-to-img/`，全局共用，由 skill 内部落盘 | ADR-0023 |
-| 生图触发方式 | AI 主动提议，纯提示词，不做 hook | ADR-0023 |
-| Mermaid 渲染与失败回退 | pi-web 的 `MermaidBlock.tsx` 有现成实现 | `pi-web-研究/03a-Markdown管线.md` |
-| HTML 输出服务端渲染 | 首版不做 | — |
+| 学习计划 | 由 MISSION.md 承担，不做“每天学什么”的拆分 | `todo.md` |
+| 对话标题生成 | 后端独立 LLM 调用，写回 `pi_session.name` | `数据库设计.md` |
+| 助教会话压缩参数 | 保持 Pi 默认 | 原对齐结论 |
 
 ### 部署与运维
 
 | 问题 | 结论 | 出处 |
 | --- | --- | --- |
 | Pi 实例的进程模型 | 所有 AgentSession 跑在后端宿主进程内（进程内 SDK），桥接层从 pi-web 移植到 Express；不 spawn 子进程 | ADR-0024 |
-| Web 后端框架 | Express 5。有状态后端不受任何框架惩罚，选资料最厚、概念最少的 | ADR-0025 |
-| 前端框架与构建 | React + TypeScript + Vite + Tailwind，状态管理用内置 hooks 不引库。pi-web 前端组件直接抄 | ADR-0025 |
-| Docker 基础镜像 | `node:22-slim`。alpine 只小 87MB，不值得换取 musl/BusyBox 差异 | ADR-0015 |
-| 镜像内的语言运行时 | 只有 Node.js，不装 Python。工具脚本用 Shell / Node / 预编译 Go 二进制 | ADR-0015 |
-| Go 工具怎么进镜像 | 独立仓库开发，GitHub Actions 交叉编译，本仓库只 `COPY` 二进制 | ADR-0015 |
-| SQLite 挂载 | 单独挂卷。单进程访问，WAL 非硬前提但开着无害 | ADR-0015、ADR-0024 |
-| 用户认证 | 单用户账号密码，不做 OAuth，永远不做多用户、不预留 `tenant_id` | ADR-0022 |
-| 备份与导出 | 只做导出不做自动备份；在线导出打包 `~/pi-teacher/` 但不含 SQLite（需停容器手动复制） | ADR-0022 |
-| 手机端 | 不做 apkg、不做原生端。以后只是 WebUI 适配小屏，后端不改 | ADR-0022 |
-| Pi 事件流转 SSE | pi-web 有实现，事件订阅层可原样抄 | ADR-0024 |
-| 沙箱选型 | 设计工具时再定 | — |
-
-## 已核实的外部事实
-
-以下来自对源码的核实，供决策参考，本身不是结论。
-
-### Pi CLI 与会话生命周期（核实于 v0.84.2，详见 `pi-会话生命周期调研.md`）
-
-- **`--session-id <id>` 存在，且「不存在则以该 id 新建」**。此前本文写过「官方没有 `--session` 参数」，是错的。
-- `--session <path|id>` 命中其他项目的会话时会读 stdin 等 y/N 确认，**无头场景下会死锁**，应避免。
-- **cwd 没有 CLI 参数**，Pi 取 `process.cwd()`。只能靠 spawn 的 `cwd` 选项或 SDK 的 `cwd` 参数指定。
-- session id 须匹配 `/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`。
-- **stdin/stdout 不是 TTY 时自动降级为 print 模式**，不会卡在交互界面。
-- Pi 有四种运行形态：interactive / print / json / **rpc**。RPC 是 stdin 收 JSON 命令、stdout 出 JSON 事件的常驻协议，SIGTERM 有优雅退出路径。官方警告不能用 Node `readline` 读这个流，SDK 导出了 `RpcClient` 已处理分帧。
-- **一个 RPC 进程同一时刻只挂一个会话**，可在进程内 `switch_session` 切换，但没有「一进程多并行会话」的能力。
-- SDK 两级都有 `dispose()`：`AgentSession.dispose()`（abort 全部工作、失效扩展上下文、退订事件、清理 WebSocket 资源）与 `AgentSessionRuntime.dispose()`（先发 `session_shutdown` 再调前者）。没有 `close()`。
-- `dispose()` 不 flush 会话文件——持久化在每条消息结束时已完成。
-- **`AgentSession.fork()` 原地变异内部状态**，fork 后 `inner.sessionId` 变成新 id，宿主必须立刻销毁旧 wrapper。
-- pi-web 走的是进程内 SDK 方案（`globalThis.__piSessions` 注册表 + 启动锁 + 10 分钟空闲回收），不 spawn pi CLI。官方文档也建议 Node 宿主直接用 SDK。ADR-0024 最终采纳同一模型，并把 `globalThis` 补丁简化为模块级变量（那是 Next dev 热重载特有的坑）。
-- 一个空闲会话实例占多少内存：**pi-web 的代码与文档里都没有数字**，也没有会话数上限配置。
-
-### Pi 的存储与注入机制（核实于 v0.84.2）
-
-- 默认会话存储是 JSONL，条目以 `id` / `parentId` 构成树结构，压缩不删除旧条目，完整历史可用于 Web UI 展示。
-- 官方存在 SQLite 会话后端，但属 pre-stabilization：schema 近期发生过一次不带迁移的破坏性变更。
-- 存在可自行实现的会话仓库与存储接口，是落到自有存储的正规入口。
-- **没有官方的自动标题生成能力**，标题需自建。
-- 会话头部没有自由 metadata 字段槽位，自定义业务数据需走自定义条目通道。
-- **`context` 事件**：每次 LLM 调用前触发，返回值只进请求 payload，不写 jsonl、不受压缩影响，是每轮动态注入的正规通道。`before_agent_start` 注入的 `role: "custom"` 消息会落盘且参与压缩，不适合此用途。
-- 自动压缩可配置触发阈值与保留窗口，压缩产物是追加的条目，原始消息保留。
-- `AGENTS.md` 机制：全局 `~/.pi/agent/AGENTS.md`（是 `agent/` 不是根 `.pi/`）+ **从文件系统根到 cwd 的全部祖先目录**各取一个（`resource-loader.js:93-105` 向上遍历，不在 git 根停止；同目录按 `AGENTS.override.md` > `AGENTS.md` > `AGENTS.MD` > `CLAUDE.md` > `CLAUDE.MD` 取第一个，小写 `agents.md` 不认）。全部拼接注入 `<project_context>`，不互相覆盖。不受压缩影响。**`@文件` 引用不存在于 AGENTS.md 内部**，它是 CLI 参数语法，不是文件 import。skills 全局目录 `~/.pi/agent/skills/`，同名冲突项目胜全局。
-- `SessionManager.create(cwd, sessionDir)` 可自定义会话存储目录，JSONL 平铺在 `sessionDir` 下。
-- **延迟落盘但路径提前确定**：文件名在构造时生成（`<时间戳>_<sessionId>.jsonl`），`getSessionFile()` 创建后立即可取，写盘动作延迟到首条 assistant 回复。所以路径不需要回填。
-- `create(cwd, sessionDir, options)` 的 `options.id` 可自定义 sessionId，会进入文件名。
-- `open(path, sessionDir, cwdOverride)` 可完全自定义文件路径，但 sessionId 随机不可指定，`cwd` 需显式传第三参否则退化为 `process.cwd()`。传入 0 字节的已存在文件会让 header 当场落盘。
-- 原生无 subagent，但可用 `InlineExtension` + `defineTool` 自行实现（pi-web 的做法，MIT 可复用）。
-
-### Docker 基础镜像（实测于 2026-09-06，见 `../scripts/probe-base-images.sh`）
-
-- `node:22-alpine` 230MB / `node:22-slim` 325MB。alpine 补齐 bash + GNU coreutils 后 238MB，差距缩到 87MB。
-- **两个镜像都不自带 python3**，也没有 pip3。
-- `better-sqlite3` 在 alpine（musl）和 slim（glibc）都有预编译二进制，3 秒装完，**不需要 node-gyp 与编译工具链**。
-- slim 的 `/bin/sh` 是 dash，不是 bash。写脚本要么显式 `#!/bin/bash`，要么只用 POSIX 语法。
-- BusyBox 1.37 已支持 `sed -i.bak`（此前判断有误）。
-
-### Anki（已决定不集成，见 ADR-0008）
-
-- AnkiConnect 是社区插件，寄生在桌面进程内，要求 Anki 常驻；官方无 HTTP API，且明确拒绝此类贡献。
-- `answerCards` 支持 ease 1–4 对应四档评级，走真实调度器，不需要 GUI 在复习界面。
-- Anki 持有 collection 的独占锁，第三方进程无法并发读写。
-- 卡片级 FSRS 记忆状态在 `cards.data` JSON 列中，AnkiConnect 未暴露。
-- 官方 Python `anki` 包是能力最全的无 GUI 路径，但需要 Python sidecar。
-- `ts-fsrs` 实现 FSRS-6，参数与 Anki 同源同序，日后需要互操作时可映射。
+| Web 后端框架 | Express 5 | ADR-0025 |
+| 前端框架与构建 | React + TypeScript + Vite + Tailwind，状态管理用内置 hooks 不引库；复用 pi-web 前端逻辑 | ADR-0025 |
+| 手机端 | 只做 WebUI 响应式适配，后端不变 | ADR-0022 |
+| Pi 事件流转 SSE | 使用 pi-web 事件订阅模式 | ADR-0024 |
