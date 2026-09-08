@@ -2,9 +2,13 @@
 **/.env
 skills/*/**/.env
 
+# to-spec 过程产物：规格已提炼进 ADR，scratch 不入库
+.scratch/
+
 # 依赖与构建产物
 node_modules/
 dist/
 
 # dev 验证数据（冒烟测试每次重建）
 tools-dev/server/dev-data/
+server/dev-data/

@@ -17,3 +17,13 @@ bug影响与触发条件: 开启默认 steps 且不在 card_schedule 加 learnin
 bug原因: 新版 typebox 把 schema builders 拆到子路径导出，`typebox/type/index.mjs` 等子模块没有 `Type` 命名空间；只有根入口 `typebox` 有。
 bug影响与触发条件: 按旧文档 `import { Type } from "typebox/type"` 或直接 require 子路径时报 undefined。
 解决方法: 统一 `import { Type } from "typebox"`（根入口）；对齐 pi-coding-agent 的依赖版本（1.3.7）避免双实例。
+
+### 会话注册表键名不统一：注册用 SDK 内部 id，查询用 jsonl 路径
+bug原因: pi 的 SessionManager 不传 id 时 `sessionId = uuidv7()`（随机短 id），而宿主业务层习惯用 `sessionFile`（jsonl 路径）寻址会话。两者是不同字符串，注册与查询键不一致必然 miss。
+bug影响与触发条件: 任何「桥接 SDK 会话 + 外部按文件路径寻址」的宿主架构必踩（pi-web 自己用 sessionId 与路径混用，本宿主一路用路径就撞上）。表现为会话「不在运行」、SSE 订阅 404、事件永不达。
+解决方法: 注册表双 key——`wrapper.sessionId`（SDK id）与 `sessionFile`（jsonl 路径）都映射到同一 wrapper，destroy 时两个都清；遍历列表按 wrapper 对象去重。对外统一用 jsonl 路径，SDK id 仅内部事件。
+
+### AgentSessionWrapper 生命周期回调设成单槽会被互相覆盖
+bug原因: `onDestroy(cb)` 用私有单字段赋值，第二次调用（如测试打点）会替换掉第一次（注册表清理），被覆盖的回调永远不执行。
+bug影响与触发条件: 凡是「框架注册清理逻辑 + 外部监听并存」的表层都会踩——外部一旦注册回调，框架自身的销毁清理悄悄失效，内存泄漏级 bug 且无报错。
+解决方法: 生命周期回调一律用监听器数组（push + 逐个 try/catch），不要单槽赋值；这同时让框架内部与调用方可安全共存。

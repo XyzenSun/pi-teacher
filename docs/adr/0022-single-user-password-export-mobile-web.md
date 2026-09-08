@@ -8,9 +8,16 @@
 
 这不是「首版先不做」，是**明确不做**。多用户会让每张表多一个外键、每个查询多一个条件、每个文件路径多一层目录，而收益是零——这个工具的形态是个人学习助手，要给第二个人用就再起一个容器。
 
-## 认证：账号密码
+## 认证：账号密码（user 表 + scrypt + setup 页）
 
-单用户认证只需要挡住「不是你的人」。做法是配置文件或环境变量里放一组用户名 + 密码哈希，登录后发 session cookie。
+单用户认证只需要挡住「不是你的人」。实际落地（backend-host-mvp）：`user` 表存一行（username + scrypt 密码哈希），首启动 user 表空 → WebUI 走 setup 页设置密码 → 登录发签名 session cookie。
+
+最初设想是「配置文件放密码哈希」，settle 到数据库表的原因：**配置文件放哈希需要一个交错的启动流程**（首次启动没配置 → 要么生成随机密码要用户去看日志，要么用默认密码——都别扭）。user 表天然承接「首次为空需要初始化」的状态，加一张表与整个 schema 的现有形态（better-sqlite3 + `initializeSchema`）一致，不引新机制。
+
+哈希与 cookie 的实现选择（对应代码 `server/src/auth/`）：
+- **scrypt**（Node 内置 `crypto`）存储自描述格式 `scrypt$N$r$p$saltHex$hashHex`，不引 bcrypt/argon2 依赖。
+- cookie 值 `token.HMAC-SHA256(token, serverKey)`，HttpOnly + SameSite=Lax；serverKey 首启动随机生成落 `data/cookie.key`（重启后旧 cookie 仍有效，不需要重登）。
+- 登录失败不区分「用户名错/密码错」（防枚举）；`/api/auth/me` 做会话探测，`setup` 仅 user 表空时可调用（409 幂等拒绝）。
 
 **不做 OAuth**。OAuth 解决的是「用第三方身份登录、不自己管密码」，代价是依赖外部 provider、需要可回调的公网地址、多一套授权流程。单用户本地部署用它是杀鸡用牛刀。若日后部署到公网 VPS 且想用 GitHub 账号登录，再加，届时也是可选项而非替换。
 
@@ -44,7 +51,7 @@
 
 ## Consequences
 
-- 认证模块极简：一个登录页、一组配置、一个 cookie 校验中间件。不需要用户表。
+- 认证模块极简：一个 user 表（最多一行）、setup/login 页、一个 cookie 校验中间件（`requireAuth`）。单用户语义由「表中只存一行」约定保证，不做多用户隔离。
 - 导出接口需要处理大文件——`materials/` 可能有几百 MB 的视频转录和 PDF 原件，压缩包要流式生成而不是全读进内存。
 - WebUI 导出按钮旁固定一段说明文字，讲清 SQLite 需要停容器单独复制。
 - 前端从一开始就按响应式写，不等到「做手机端」时再重构。这不增加多少工作量，但能省一次大改。
