@@ -7,9 +7,10 @@
 //   保留——wrapper 生命周期、prompt 准入队列与两段式 ack、空闲回收、
 //        启动锁、send() 命令表、emit/onEvent、destroy/shutdown、优雅退出
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { withPromptContext } from "../projection/context-inject.ts";
+import { selectDefaultModel } from "../session/models.ts";
 import type { AgentSessionLike, ToolInfo } from "./pi-types.ts";
 import type { SessionToolContext } from "../tools/context.ts";
 import { createPiTeacherExtension } from "../tools/factory.ts";
@@ -179,6 +180,10 @@ export class AgentSessionWrapper {
     this.onDestroyCallbacks.push(cb);
   }
 
+  notifySessionChanged(): void {
+    if (this._alive) this.emit({ type: "session_updated" });
+  }
+
   async send(command: Record<string, unknown>): Promise<unknown> {
     const type = command.type as string;
 
@@ -228,16 +233,15 @@ export class AgentSessionWrapper {
           this.pendingPromptCount += 1;
           let prompt: Promise<void>;
           try {
-            prompt = this.inner.prompt(command.message as string, {
+            prompt = withPromptContext(command.contextSummary as string | undefined, () => this.inner.prompt(command.message as string, {
               ...(promptImages?.length ? { images: promptImages } : {}),
               ...(streamingBehavior ? { streamingBehavior } : {}),
               source: "rpc",
-              // Match pi's RPC contract: acknowledge only after synchronous prompt
-              // validation and extension preflight have accepted the submission.
+              // 只有 SDK 校验与扩展 preflight 接受后才确认，不能假成功。
               preflightResult: (success) => {
                 if (success) acceptPreflight();
               },
-            });
+            }));
           } catch (error) {
             finishPrompt();
             throw error;
@@ -288,9 +292,8 @@ export class AgentSessionWrapper {
         const model = this.inner.model;
         const contextUsage = this.inner.getContextUsage();
         return {
-          sessionId: this.inner.sessionId,
-          sessionFile: this.inner.sessionFile ?? "",
           isStreaming: this.inner.isStreaming,
+          isRunning: this.isRunning(),
           isPromptRunning: this.pendingPromptCount > 0,
           isCompacting: this.inner.isCompacting,
           model: model ? { id: model.id, provider: model.provider } : undefined,
@@ -333,11 +336,21 @@ export class AgentSessionWrapper {
       }
 
       case "get_session_stats": {
-        return {
-          ...this.inner.getSessionStats(),
-          sessionName: this.inner.sessionManager.getSessionName(),
-        };
+        const { sessionFile: _path, sessionId: _id, ...stats } = this.inner.getSessionStats();
+        return { ...stats, sessionName: this.inner.sessionManager.getSessionName() };
       }
+
+      case "get_commands": {
+        return [
+          ...this.inner.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, description: command.description ?? "扩展命令" })),
+          ...this.inner.promptTemplates.map((template) => ({ name: template.name, description: template.description ?? "提示词模板" })),
+          ...this.inner.resourceLoader.getSkills().skills.map((skill) => ({ name: `skill:${skill.name}`, description: skill.description ?? "Skill" })),
+        ];
+      }
+
+      case "clear_queue": return this.inner.clearQueue();
+      case "steer": return this.inner.steer(command.message as string);
+      case "follow_up": return this.inner.followUp(command.message as string);
 
       case "get_last_assistant_text": {
         return { text: this.inner.getLastAssistantText() ?? "" };
@@ -351,9 +364,11 @@ export class AgentSessionWrapper {
       case "get_tools": {
         const all: ToolInfo[] = this.inner.getAllTools();
         const active = new Set<string>(this.inner.getActiveToolNames());
-        return all.map((t) => ({
-          ...t,
-          active: active.has(t.name),
+        return all.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          active: active.has(tool.name),
         }));
       }
 
@@ -377,6 +392,7 @@ export class AgentSessionWrapper {
 
   destroy(): void {
     if (!this._alive) return;
+    this.emit({ type: "session_recycled" });
     this._alive = false;
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.unsubscribe?.();
@@ -473,19 +489,15 @@ function registerSignalHandlers(): void {
   process.once("exit", () => sessionRegistry.forEach((session) => session.destroy()));
 }
 
-function registerWrapper(wrapper: AgentSessionWrapper): void {
-  // 双 key：SDK 内部 id（inner.sessionId，uuidv7）与 jsonl 路径都指向同一
-  // wrapper。前端/路由层按 jsonl 路径寻址（conversations 路由的 :key），
-  // 而 wrapper 事件、流内部用 SDK 的 sessionId——两个都必须可查。
-  const sessionId = wrapper.sessionId;
-  const aliases: string[] = [];
-  if (wrapper.sessionFile) aliases.push(wrapper.sessionFile);
+function registerWrapper(wrapper: AgentSessionWrapper, stableKey: string): void {
+  // 稳定业务 key 是路由入口，SDK id 与路径只供内部事件消费者使用。
+  const keys = new Set([stableKey, wrapper.sessionId, wrapper.sessionFile].filter(Boolean));
   wrapper.onDestroy(() => {
-    sessionRegistry.delete(sessionId);
-    for (const alias of aliases) sessionRegistry.delete(alias);
+    for (const key of keys) {
+      if (sessionRegistry.get(key) === wrapper) sessionRegistry.delete(key);
+    }
   });
-  sessionRegistry.set(sessionId, wrapper);
-  for (const alias of aliases) sessionRegistry.set(alias, wrapper);
+  for (const key of keys) sessionRegistry.set(key, wrapper);
   wrapper.start();
   registerSignalHandlers();
 }
@@ -515,72 +527,62 @@ export function getSessionWrapper(sessionId: string): AgentSessionWrapper | unde
  */
 export async function startWorkspaceSession(
   sessionKey: string,
-  workspaceRoot: string,
+  workPath: string,
   toolContext: SessionToolContext,
   options: { sessionFile?: string; thinkingLevel?: ThinkingLevel } = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const existing = sessionRegistry.get(sessionKey);
-  if (existing?.isAlive()) return { session: existing, realSessionId: sessionKey };
-
+  if (existing?.isAlive()) return { session: existing, realSessionId: existing.sessionId };
   const inflight = startLocks.get(sessionKey);
   if (inflight) return inflight;
 
-  // 惰性 import：避免 pi-coding-agent 在模块顶层就拉起（对 verify 脚本不友好）
-  const {
-    createAgentSessionFromServices,
-    createAgentSessionServices,
-    getAgentDir,
-    SessionManager,
-    SettingsManager,
-  } = await import("@earendil-works/pi-coding-agent");
-
-  const workspaceDir = resolve(workspaceRoot);
-  let sessionManager;
-  if (options.sessionFile) {
-    sessionManager = SessionManager.open(options.sessionFile, workspaceDir);
-  } else {
-    sessionManager = SessionManager.create(workspaceDir, workspaceDir);
-  }
-  const sessionCwd = sessionManager.getCwd();
-
+  // 启动锁必须早于首次 await（包括 dynamic import），否则双击会重复创建 wrapper。
   const starting = (async () => {
+    const { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, SessionManager, SettingsManager } = await import("@earendil-works/pi-coding-agent");
+    const workspaceDir = resolve(workPath);
+    const sessionManager = options.sessionFile
+      ? SessionManager.open(options.sessionFile, workspaceDir, workspaceDir)
+      : SessionManager.create(workspaceDir, workspaceDir, { id: sessionKey });
     const agentDir = getAgentDir();
-    const settingsManager = SettingsManager.create(sessionCwd, agentDir);
-
-    // 生产宿主：noSkills 等开关全关（=资源全装载，与 run-real 的全关相反），
-    // skills 全局目录 ~/.pi/agent/skills/ 与祖先 AGENTS.md 注入都由此生效
+    const settingsManager = SettingsManager.create(workspaceDir, agentDir);
+    const stylePath = join(workspaceDir, "style.md");
+    const style = existsSync(stylePath) ? readFileSync(stylePath, "utf8").trim() : "";
     const services = await createAgentSessionServices({
-      cwd: sessionCwd,
+      cwd: workspaceDir,
       agentDir,
       settingsManager,
       resourceLoaderOptions: {
         extensionFactories: [createPiTeacherExtension(toolContext)],
+        ...(style ? { appendSystemPrompt: [style] } : {}),
       },
     });
-
-    const hasExistingMessages = sessionManager.getBranch().some((entry) => entry.type === "message");
+    // 即使尚无对话消息，set_model 也已经持久化；重新打开不能被默认模型覆盖。
+    const hasModel = sessionManager.getBranch().some((entry) => entry.type === "model_change");
+    const initialModel = hasModel ? undefined : selectDefaultModel(services.modelRuntime, workspaceDir);
     const { session: inner } = await createAgentSessionFromServices({
       services,
       sessionManager,
-      ...(hasExistingMessages ? {} : options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+      ...(initialModel ? { model: initialModel } : {}),
+      ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
     });
-
-    const wrapper = new AgentSessionWrapper(inner as unknown as AgentSessionLike, {
-      onAgentRunComplete: (completedSessionId) => {
-        // 轮次空闲即通知 hub（标题生成、前端提示等消费者订阅这里）
-        emitAgentRunComplete(completedSessionId);
-      },
-    });
-    const realSessionId = inner.sessionId as string;
-    registerWrapper(wrapper);
-
-    return { session: wrapper, realSessionId };
-  })().finally(() => {
-    startLocks.delete(sessionKey);
-  });
-
+    try {
+      await inner.bindExtensions({ mode: "rpc" });
+      const wrapper = new AgentSessionWrapper(inner as unknown as AgentSessionLike, {
+        onAgentRunComplete: emitAgentRunComplete,
+      });
+      registerWrapper(wrapper, sessionKey);
+      return { session: wrapper, realSessionId: inner.sessionId };
+    } catch (error) {
+      inner.dispose();
+      throw error;
+    }
+  })().finally(() => startLocks.delete(sessionKey));
   startLocks.set(sessionKey, starting);
   return starting;
+}
+
+export async function shutdownAllSessions(): Promise<void> {
+  await Promise.allSettled([...new Set(sessionRegistry.values())].map((session) => session.shutdown()));
 }
 
 /** 按文件路径判断会话是否存在（jsonl 平铺布局，直接查文件系统）。 */

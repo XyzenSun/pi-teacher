@@ -17,6 +17,8 @@ export function openDatabase(dbPath: string): Database.Database {
     }
     sharedConnection = new Database(dbPath);
     sharedConnection.pragma("journal_mode = WAL");
+    sharedConnection.pragma("foreign_keys = ON");
+    sharedConnection.pragma("busy_timeout = 5000");
     return sharedConnection;
 }
 

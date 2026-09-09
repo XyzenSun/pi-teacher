@@ -17,6 +17,10 @@
   - `server/src/session/title-generator.ts`（移植自 session-title.ts）
   - `server/src/auth/password.ts`（scrypt 哈希写法参考 web-auth.ts）
   - `server/src/security/`（request-security.ts 与 path-security.ts 的 Express 适配版）
+  - `web/src/lib/markdown.ts`（Markdown 管线与 normalizeDisplayMath，原样）
+  - `web/src/lib/file-fuzzy.ts`（@ 文件补全打分，原样）
+  - `web/src/lib/chat-lazy-load.ts`（滚动跟随与懒加载纯函数，原样）
+  - `web/src/chat/stream-reducer.ts`（参考 lib/streaming-message.ts 与 use-agent-stream 重写）
 
 MIT License
 

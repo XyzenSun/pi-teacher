@@ -9,7 +9,9 @@
     "smoke": "tsx src/verify/smoke.ts",
     "verify": "tsx src/verify/run-real.ts",
     "http-smoke": "tsx src/verify/http-smoke.ts",
-    "verify:lifecycle": "tsx src/verify/lifecycle.ts"
+    "verify:lifecycle": "tsx src/verify/lifecycle.ts",
+    "verify:schema": "tsx src/verify/schema-check.ts",
+    "verify:attachments": "tsx src/verify/attachments-check.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.2",

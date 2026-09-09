@@ -11,26 +11,12 @@ import type { SessionToolContext } from "./context.ts";
  * 「某标题下到哪里为止」的边界计算——这算术交给模型是负担且易错。
  * 行号与 Pi 自带 read 的 offset/limit 组合使用，是组合关系不是替代。
  *
- * 路径安全：所有 path 参数被限制在 ctx.workspaceRoot 之下，防模型读
- * 宿主任意文件（相对路径基于 workspaceRoot 解析）。
+ * 相对路径基于当前 Pi Session 的 workPath 解析。按 ADR-0030 不实现应用级
+ * 文件沙箱；容器与远程执行 skill 负责系统边界，HTTP 附件接口单独限制路径。
  */
 
 function toolResult(text: string): { content: Array<{ type: "text"; text: string }>; details: null } {
     return { content: [{ type: "text", text }], details: null };
-}
-
-/** 解析并校验路径：必须在 workspaceRoot 内。拒绝信息带上合法根路径方便模型修正。 */
-function resolveInsideWorkspace(rawPath: string, workspaceRoot: string): { ok: true; abs: string } | { ok: false; reason: string } {
-    const abs = path.resolve(workspaceRoot, rawPath);
-    // path.resolve 已消掉 ../，再用 relative 验证没有越界
-    const rel = path.relative(workspaceRoot, abs);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
-        return {
-            ok: false,
-            reason: `拒绝：路径超出工作区范围（${rawPath}）。只能访问 ${workspaceRoot} 之内的文件。`,
-        };
-    }
-    return { ok: true, abs };
 }
 
 interface HeadingLine {
@@ -65,12 +51,11 @@ export function createFileTools(ctx: SessionToolContext): ToolDefinition[] {
             ),
         }),
         async execute(_toolCallId, params) {
-            const resolved = resolveInsideWorkspace(params.path, ctx.workspaceRoot);
-            if (!resolved.ok) return toolResult(resolved.reason);
+            const filePath = path.resolve(ctx.workPath, params.path);
 
             let content: string;
             try {
-                content = await fs.readFile(resolved.abs, "utf-8");
+                content = await fs.readFile(filePath, "utf-8");
             } catch {
                 return toolResult(`拒绝：文件不存在或不可读（${params.path}）。`);
             }
@@ -95,12 +80,11 @@ export function createFileTools(ctx: SessionToolContext): ToolDefinition[] {
             heading: Type.String({ description: "标题文本，不带 # 前缀，如「梯度下降」" }),
         }),
         async execute(_toolCallId, params) {
-            const resolved = resolveInsideWorkspace(params.path, ctx.workspaceRoot);
-            if (!resolved.ok) return toolResult(resolved.reason);
+            const filePath = path.resolve(ctx.workPath, params.path);
 
             let content: string;
             try {
-                content = await fs.readFile(resolved.abs, "utf-8");
+                content = await fs.readFile(filePath, "utf-8");
             } catch {
                 return toolResult(`拒绝：文件不存在或不可读（${params.path}）。`);
             }
@@ -154,12 +138,11 @@ export function createFileTools(ctx: SessionToolContext): ToolDefinition[] {
             path: Type.String({ description: "文件路径（工作区内相对或绝对路径）" }),
         }),
         async execute(_toolCallId, params) {
-            const resolved = resolveInsideWorkspace(params.path, ctx.workspaceRoot);
-            if (!resolved.ok) return toolResult(resolved.reason);
+            const filePath = path.resolve(ctx.workPath, params.path);
 
             let content: Buffer;
             try {
-                content = await fs.readFile(resolved.abs);
+                content = await fs.readFile(filePath);
             } catch {
                 return toolResult(`拒绝：文件不存在或不可读（${params.path}）。`);
             }

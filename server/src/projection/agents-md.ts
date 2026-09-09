@@ -1,40 +1,17 @@
-/**
- * 投影：数据库是源，工作区文件是投影（ADR-0014）。
- * 开对话时整份覆盖写 AGENTS.md / style.md——并发对话覆盖冲突不处理
- * （数据库设计.md 已定：概率低、后果轻）。
- */
-import { promises as fs } from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 
-/** 把 agents_md.prompt 整份覆盖写到工作区 AGENTS.md。 */
-export async function projectAgentsMd(db: Database.Database, workspaceDir: string, agentsMdId: number): Promise<void> {
-  const row = db
-    .prepare("SELECT name, prompt FROM agents_md WHERE id = ?")
-    .get(agentsMdId) as { name: string; prompt: string } | undefined;
-  if (!row) {
-    throw new Error(`agents_md ${agentsMdId} 不存在，投影失败`);
-  }
-  await fs.writeFile(path.join(workspaceDir, "AGENTS.md"), row.prompt, "utf8");
+/** 数据库单向投影到本条 Pi Session 的目录，绝不写入 Space 的共享目录。 */
+export function projectAgentsMd(db: Database.Database, workPath: string, agentsMdId: number): void {
+  const row = db.prepare("SELECT prompt FROM agents_md WHERE id = ?").get(agentsMdId) as { prompt: string } | undefined;
+  if (!row) throw new Error(`agents_md ${agentsMdId} 不存在，无法投影`);
+  writeFileSync(path.join(workPath, "AGENTS.md"), row.prompt, "utf8");
 }
 
-/** 把 teach_style.prompt 整份覆盖写到工作区 style.md；无风格时删旧文件。 */
-export async function projectTeachStyle(
-  db: Database.Database,
-  workspaceDir: string,
-  teachStyleId: number | null,
-): Promise<void> {
-  const stylePath = path.join(workspaceDir, "style.md");
-  if (teachStyleId === null) {
-    // 不注入风格：清掉上一对话可能留下的投影，避免残留生效
-    await fs.rm(stylePath, { force: true });
-    return;
-  }
-  const row = db
-    .prepare("SELECT prompt FROM teach_style WHERE id = ?")
-    .get(teachStyleId) as { prompt: string } | undefined;
-  if (!row) {
-    throw new Error(`teach_style ${teachStyleId} 不存在，投影失败`);
-  }
-  await fs.writeFile(stylePath, row.prompt, "utf8");
+export function projectTeachStyle(db: Database.Database, workPath: string, teachStyleId: number | null): void {
+  const row = teachStyleId === null ? null : db.prepare("SELECT prompt FROM teach_style WHERE id = ?").get(teachStyleId) as { prompt: string } | undefined;
+  if (teachStyleId !== null && !row) throw new Error(`teach_style ${teachStyleId} 不存在，无法投影`);
+  // 空风格仍有独立投影文件；SDK 仅追加非空内容，不继承其他对话的风格。
+  writeFileSync(path.join(workPath, "style.md"), row?.prompt ?? "", "utf8");
 }

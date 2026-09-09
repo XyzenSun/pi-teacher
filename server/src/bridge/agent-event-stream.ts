@@ -27,6 +27,7 @@ export function createAgentEventStream(
   abortSignal: AbortSignal,
   sessionId: string,
   sessionPromise: Promise<AgentEventStreamSession>,
+  project: (value: unknown) => unknown = (value) => value,
 ): ReadableStream<Uint8Array> {
   let cancelStream: (closeController: boolean) => void = () => {};
 
@@ -60,12 +61,13 @@ export function createAgentEventStream(
         }
       };
       const encode = (data: unknown) => {
-        enqueueText(`data: ${JSON.stringify(data)}\n\n`);
+        enqueueText(`data: ${JSON.stringify(project(data))}\n\n`);
       };
       const forwardEvent = (event: AgentEventLike, snapshot: unknown) => {
         if (isEventIncludedInSnapshot(event, snapshot)) return;
         const clientEvent = toClientAgentEvent(event);
         if (clientEvent) encode(clientEvent);
+        if (event.type === "session_recycled") cleanup(true);
       };
 
       const publishSession = async () => {
@@ -80,7 +82,8 @@ export function createAgentEventStream(
               bufferedEvents.push(event);
               return;
             }
-            forwardEvent(event, snapshot);
+            // 快照去重只用于握手前缓冲，实时 delta 不能因为对象复用被误删。
+            forwardEvent(event, undefined);
           };
 
           const stopListening = session.onEvent(handleEvent);

@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+/*
+ * Atelier Mind 设计令牌（前端模板/DESIGN.md）：暖纸白底、深板岩主色、鼠尾草强调。
+ * Tailwind v4 用 @theme 声明即可生成 bg-surface / text-secondary 等工具类。
+ */
+@theme {
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-reading: "Newsreader", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-surface: #f9f9f8;
+  --color-surface-dim: #d9dad9;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f3f4f2;
+  --color-surface-container: #edeeed;
+  --color-surface-container-high: #e7e8e7;
+  --color-surface-container-highest: #e2e3e1;
+  --color-on-surface: #1a1c1b;
+  --color-on-surface-variant: #44474a;
+  --color-muted: #8a8e94;
+
+  --color-primary: #1e252b;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #dce3eb;
+
+  --color-secondary: #456558;
+  --color-secondary-soft: #5b7c6e;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #c7ebda;
+  --color-on-secondary-container: #2d4d41;
+
+  --color-tertiary: #8c7355;
+  --color-tertiary-container: #fdddb9;
+  --color-on-tertiary-container: #584329;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+
+  --color-outline: #74777b;
+  --color-outline-variant: #d4cfc7;
+  --color-line: #e5e2dc;
+
+  --spacing-sidebar: 16rem;
+  --spacing-aside: 22rem;
+  --spacing-reading: 44rem;
+  --spacing-workstation: 84rem;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+}
+
+@layer base {
+  html, body, #root { height: 100%; margin: 0; }
+  body {
+    @apply bg-surface text-on-surface font-body antialiased text-[14px] leading-[1.6];
+    overscroll-behavior: none;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 3px; }
+  textarea, input, select, button { font: inherit; }
+}
+
+/*
+ * Tailwind v4 里只有 @utility 声明的类才能被其他规则 @apply，
+ * 所以这些复用组件类用 @utility 而不是 @layer components。
+ */
+@utility icon { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; }
+@utility btn { @apply inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+@utility btn-primary { @apply btn bg-primary text-on-primary hover:bg-[#2b343c]; }
+@utility btn-secondary { @apply btn bg-secondary text-on-secondary hover:bg-secondary-soft; }
+@utility btn-ghost { @apply btn text-on-surface-variant hover:bg-surface-container; }
+@utility btn-outline { @apply btn border border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low; }
+@utility btn-danger { @apply btn text-error hover:bg-error-container; }
+@utility input { @apply w-full rounded-md border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-[13px] focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20; }
+@utility card { @apply rounded-lg bg-surface-container-lowest border border-line shadow-[0_1px_2px_rgba(30,37,43,0.04)]; }
+@utility label { @apply text-[11px] font-medium tracking-[0.04em] uppercase text-on-surface-variant; }
+@utility chip { @apply inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium; }
+@utility tab { @apply px-3 py-2 text-[13px] font-medium border-b-2 border-transparent text-on-surface-variant hover:text-on-surface; }
+@utility tab-active { @apply border-secondary text-secondary; }
+
+/* Markdown 正文：阅读字体，行宽由容器限制 */
+.prose-chat { @apply text-[15px] leading-[1.7]; }
+.prose-chat > * + * { margin-top: 0.75em; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { @apply font-reading font-medium text-primary; }
+.prose-chat h1 { font-size: 1.5em; } .prose-chat h2 { font-size: 1.3em; } .prose-chat h3 { font-size: 1.15em; }
+.prose-chat p code, .prose-chat li code { @apply font-mono text-[0.85em] bg-surface-container px-1 py-0.5 rounded; }
+.prose-chat pre { @apply font-mono text-[13px] bg-primary text-[#e6e8ea] rounded-lg p-3 overflow-x-auto; }
+.prose-chat pre code { background: transparent; padding: 0; }
+.prose-chat ul { @apply list-disc pl-6; } .prose-chat ol { @apply list-decimal pl-6; }
+.prose-chat blockquote { @apply border-l-2 border-secondary pl-3 text-on-surface-variant italic; }
+.prose-chat table { @apply w-full text-[13px] border-collapse; }
+.prose-chat th, .prose-chat td { @apply border border-line px-2 py-1 text-left; }
+.prose-chat th { @apply bg-surface-container-low font-semibold; }
+.prose-chat a { @apply text-secondary underline underline-offset-2; }
+.prose-chat hr { @apply border-line; }
+.prose-chat img { @apply max-w-full rounded-md; }
+.prose-chat .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25em 0; }
+.prose-chat input[type="checkbox"] { @apply mr-1.5 accent-secondary; }
+.mermaid-block svg { max-width: 100%; height: auto; }

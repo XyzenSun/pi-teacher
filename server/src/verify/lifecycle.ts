@@ -4,11 +4,12 @@
  *      （jsonl 保留、注册表清空）
  *   2. SIGTERM 优雅退出：先发 session_shutdown 再 dispose，进程 0 退出码
  *
- * 不依赖 HTTP：进程内建会话（复刻 run-real 的最小路径）。
+ * 不依赖 HTTP：子进程用新 Schema 在真实临时数据库里建 Space + Pi Session，
+ * 再走 bridge 建真实 SDK 会话（复刻 run-real 的最小路径，全程无 mock）。
+ *
  * 跑法：
  *   PI_TEACHER_PROVIDER=agnes PI_TEACHER_MODEL=agnes-2.5-flash npm run verify:lifecycle
- * 或：
- *   node --experimental-strip-types 直接跑（见 package.json scripts）
+ * 模型环境不显式给时用部署默认（agnes / agnes-2.5-flash）；只传名字，不碰凭据。
  */
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -26,21 +27,29 @@ function check(name: string, condition: boolean, detail?: unknown): void {
   } else {
     failed++;
     console.error(`  ✗ ${name}`);
-    if (detail !== undefined) console.error(`    ${JSON.stringify(detail)}`);
+    if (detail !== undefined) console.error(`    ${String(JSON.stringify(detail)).slice(0, 600)}`);
   }
 }
 
+/** 子进程通过 IPC 报出的路径：会话 JSONL 与该 Pi Session 独占的工作目录。 */
+interface ChildPaths {
+  sessionFile: string;
+  workPath: string;
+}
+
 async function main(): Promise<void> {
+  // 每个 home 是一次性的：数据库、Space 目录、Pi 目录都在里面，结束时整体删除
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-lifecycle-"));
-  const workspaceRoot = path.join(homeDir, "workspace");
-  await fs.mkdir(workspaceRoot, { recursive: true });
 
   const env = {
     ...process.env,
     PI_TEACHER_IDLE_TIMEOUT_MS: "2000", // 2 秒空闲即回收
     PI_TEACHER_LIFECYCLE_HOME: homeDir,
-    PI_TEACHER_LIFECYCLE_WORKSPACE: workspaceRoot,
+    // 真实 SDK 路径需要真模型：默认取部署配置，不输出凭据
+    PI_TEACHER_PROVIDER: process.env.PI_TEACHER_PROVIDER ?? "agnes",
+    PI_TEACHER_MODEL: process.env.PI_TEACHER_MODEL ?? "agnes-2.5-flash",
   };
+  console.log(`[1] 空闲回收（模型 ${env.PI_TEACHER_PROVIDER}/${env.PI_TEACHER_MODEL}）`);
 
   // —— 子进程：建会话 → 等注册表有 wrapper → 打印 sessionFile → 等回收 ——
   const child = fork(CHILD_SCRIPT, [], { env, stdio: ["ignore", "pipe", "pipe", "ipc"] });
@@ -48,27 +57,39 @@ async function main(): Promise<void> {
   child.stdout?.on("data", (chunk) => { childOutput += chunk.toString(); });
   child.stderr?.on("data", (chunk) => { childOutput += chunk.toString(); });
 
-  const sessionFile = await new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("子进程未在 30s 内报出 sessionFile")), 30_000);
+  const childPaths = await new Promise<ChildPaths>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`子进程未在 60s 内报出 sessionFile\n${childOutput}`)), 60_000);
+    const collected: Partial<ChildPaths> = {};
     child.on("message", (message: string) => {
-      if (message.startsWith("SESSION_FILE=")) {
+      if (message.startsWith("SESSION_FILE=")) collected.sessionFile = message.slice("SESSION_FILE=".length);
+      if (message.startsWith("WORK_PATH=")) collected.workPath = message.slice("WORK_PATH=".length);
+      if (collected.sessionFile && collected.workPath) {
         clearTimeout(timeout);
-        resolve(message.slice("SESSION_FILE=".length));
+        resolve(collected as ChildPaths);
       }
     });
     child.on("exit", (code) => reject(new Error(`子进程提前退出 code=${code}\n${childOutput}`)));
   });
+  const { sessionFile, workPath } = childPaths;
 
-  // jsonl 是惰性落盘的（首条消息才建文件）：轮询等它出现，证明会话真实写入过。
-  let fileExistsWhileAlive = false;
-  for (let i = 0; i < 40; i++) {
-    if (await fs.stat(sessionFile).then(() => true).catch(() => false)) {
-      fileExistsWhileAlive = true;
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  check("会话运行期间 jsonl 已落盘（消息驱动）", fileExistsWhileAlive, sessionFile);
+  check(
+    "会话 JSONL 落在该 Pi Session 独占目录内（ADR-0030 布局）",
+    path.dirname(path.resolve(sessionFile)) === path.resolve(workPath),
+    { sessionFile, workPath },
+  );
+  check(
+    "工作目录在 home 的 learn/<space-id>/pi/<pi-session-id> 下",
+    /learn[/\\]\d+[/\\]pi[/\\]\d+$/.test(path.resolve(workPath)) && path.resolve(workPath).startsWith(path.resolve(homeDir)),
+    workPath,
+  );
+  // 新 Schema 在建行时就写了 SDK header，所以文件此刻必然存在；随后模型消息会追加条目。
+  check("会话运行期间 jsonl 已落盘", await fs.stat(sessionFile).then(() => true).catch(() => false), sessionFile);
+  check(
+    "AGENTS.md / style.md 投影与 JSONL 同在该对话目录",
+    await fs.stat(path.join(workPath, "AGENTS.md")).then(() => true).catch(() => false)
+      && await fs.stat(path.join(workPath, "style.md")).then(() => true).catch(() => false),
+    workPath,
+  );
 
   // 等子进程报出「已回收」（wrapper 销毁后子进程退出并报 code）
   const exitCode = await new Promise<number>((resolve) => {
@@ -76,12 +97,20 @@ async function main(): Promise<void> {
   });
   check("空闲超时后 wrapper 自动回收（子进程以 0 退出）", exitCode === 0, { exitCode, childOutput });
   const contentAfterReclaim = await fs.readFile(sessionFile, "utf8").catch(() => "");
+  const reclaimedLines = contentAfterReclaim.trim() === "" ? [] : contentAfterReclaim.trim().split("\n");
+  check("回收后 jsonl 保留（未随 wrapper 一起删）", reclaimedLines.length > 0, reclaimedLines.length);
+  const reclaimedRoles = reclaimedLines
+    .map((line) => { try { return JSON.parse(line) as { message?: { role?: string } }; } catch { return {}; } })
+    .map((entry) => entry.message?.role)
+    .filter((role): role is string => typeof role === "string");
   check(
-    "回收后 jsonl 保留且含消息",
-    contentAfterReclaim.includes("冒烟完成") || contentAfterReclaim.includes('"message"'),
-    contentAfterReclaim.slice(0, 120),
+    "回收后 jsonl 含真实对话消息（真 SDK 路径跑通过）",
+    reclaimedRoles.includes("user") && reclaimedRoles.includes("assistant"),
+    [...new Set(reclaimedRoles)],
   );
   check("回收后注册表为空（WRAPPERS_CLEAN=1）", childOutput.includes("WRAPPERS_CLEAN=1"), childOutput);
+  check("回收路径也走了 dispose", childOutput.includes("disposed"), childOutput);
+  check("回收前发出 session_shutdown（扩展有机会收尾）", childOutput.includes("shutdown_emitted"), childOutput);
 
   // —— SIGTERM 优雅退出：起第二个子进程，短暂空闲后发 SIGTERM ——
   console.log("\n[2] SIGTERM 优雅退出");
@@ -93,10 +122,15 @@ async function main(): Promise<void> {
   gracefulChild.stdout?.on("data", (c) => { gracefulOutput += c.toString(); });
   gracefulChild.stderr?.on("data", (c) => { gracefulOutput += c.toString(); });
 
+  let gracefulSessionFile = "";
   await new Promise<void>((resolve) => {
-    gracefulChild.on("message", (m: string) => { if (m === "READY") resolve(); });
+    gracefulChild.on("message", (m: string) => {
+      if (m.startsWith("SESSION_FILE=")) gracefulSessionFile = m.slice("SESSION_FILE=".length);
+      if (m === "READY") resolve();
+    });
     gracefulChild.on("exit", () => resolve()); // 兜底：异常退出也别挂死
   });
+  check("stay-alive 子进程已就绪（真实会话已建）", gracefulSessionFile !== "", gracefulOutput);
   gracefulChild.kill("SIGTERM");
   const gracefulExit = await new Promise<number>((resolve) => {
     gracefulChild.on("exit", (code, signal) => resolve(code ?? (signal ? -1 : -1)));
@@ -104,6 +138,11 @@ async function main(): Promise<void> {
   check("SIGTERM 后进程 0 退出码", gracefulExit === 0, { gracefulExit, gracefulOutput });
   check("session_shutdown 事件已发出", gracefulOutput.includes("shutdown_emitted"), gracefulOutput);
   check("shutdown 后 dispose 被调用", gracefulOutput.includes("disposed"), gracefulOutput);
+  check(
+    "SIGTERM 退出后 jsonl 仍在磁盘上",
+    gracefulSessionFile !== "" && await fs.stat(gracefulSessionFile).then(() => true).catch(() => false),
+    gracefulSessionFile,
+  );
 
   await fs.rm(homeDir, { recursive: true, force: true }).catch(() => {});
   console.log(`\n结果：${passed} 通过，${failed} 失败`);

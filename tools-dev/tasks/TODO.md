@@ -1,22 +1,24 @@
 # TODO
 
-## 当前状态：后端宿主完成，前端 WebUI PRD 待用户审查
+## 当前状态：前端 WebUI 桌面版 MVP 已实现，等待用户验收
 
-**backend-host-mvp 已完成**（2026-09-08 验收，commit 4006891 已推送）：Express + 桥接层 + 会话管理 + 投影/注入 + CRUD 路由 + scrypt 认证全部落地在仓库根 `server/`。验证面：smoke 74/74、run-real 真模型 7/7、http-smoke 真模型全链路 51/51、lifecycle 空闲回收 + SIGTERM 7/7、typecheck 零错误。tools-dev 冻结为历史脚手架，活跃代码在 `../server/`（见 CLAUDE.md 冻结注记）。
+**frontend-webui-mvp 已实现**（2026-09-09，未提交、未推送）：PRD 见 `tasks/frontend-webui-mvp.md`。后端按 ADR-0030 破坏性重建（`space → pi_session`，删除 `session` 表与 `session_id`，每条 Pi Session 独占 `work_path`，固定 ta/review Space 与唯一 ta Pi Session）；新增 `web/`（React 19 + TS + Vite 7 + Tailwind v4 + react-router-dom 7，hooks/context，Atelier Mind 令牌）。
 
-**下一任务：前端 WebUI**。需求已通过 `grill-doc` 收敛，完整 PRD 已写入 `tasks/frontend-webui-mvp.md`，当前等待用户审查，尚未开始实现。用户审查通过前不修改 `server/` 或创建 `web/` 代码。
+验证面（真模型 agnes/agnes-2.5-flash，全部在临时 home，零残留）：`smoke` 84/84、`verify:schema` 66/66、`verify:attachments` 116/116、`verify` 22/22、`http-smoke` 159/159（含 SPA fallback）、`verify:lifecycle` 15/15；`server`/`web` typecheck 零错误；`web` 生产构建成功。另用 agent-browser 真浏览器走通：setup→登录→建学习 Space→创建学习对话→真模型流式回复（KaTeX/Mermaid/工具折叠/提议卡片）→右侧确认卡片→固定助教一次性注入→Topic 快捷入口建复习对话→真实 FSRS 评分→模型切换→回收/重开→图片附件上传并发送→`@` 文件补全与 `/` 命令菜单→/settings 五个 tab 真实 CRUD。
 
-本任务的已确认范围：
-
-- 领域模型重建为 `space → pi_session`；删除 `session` 表和 `pi_session.session_id`；每条 Pi Session 独占 `work_path`；固定 `ta` / `review` Space，固定且唯一的 ta Pi Session；
-- WebUI 使用 React + TypeScript + Vite + Tailwind + `react-router-dom`，状态管理只用 React hooks/context；视觉与布局以 Atelier Mind 模板为准；本阶段先跑通桌面版，移动端另立任务；
-- 左侧展示 `Space → Pi Session` 两级树，助教仅从右侧固定入口复用；主区实现真实 SSE 对话；右侧实现全局 Card Proposal 与一次性上下文注入的固定助教；
-- 管理面板首版包含 Card、Glossary、Topic、Agents Md、Teach Style 的真实 CRUD/编辑；不使用模板假数据伪装功能；
-- 后端同步补齐破坏性 Schema 重建、独立工作目录、附件上传/下载/文件索引、模型查询/切换和 SPA 静态服务；
-- 不实现 Pi Session 级应用文件沙箱；制卡、复习写入等角色差异由工具控制层强制，Docker 与既有远程沙箱 skill 负责部署/执行隔离；
-- 原有 backend-host-mvp API 记录仅作历史参考，新实现必须以 PRD 和重建后的后端契约为准。
+**下一步候选（未排期）**：移动端布局；`compact`/思考等级等会话命令的 UI 入口；卡片合并（`POST /api/cards/merge` 已有接口）；Pi Session 重命名后左树即时刷新的更细粒度事件。
 
 ## 已完成任务
+
+**前端 WebUI 桌面版 frontend-webui-mvp**（2026-09-09 实现，待用户验收）：
+
+- [x] 后端 Schema 重建：`db/schema.ts` + `db/seed.ts` + `session/repository.ts`（CHECK/部分唯一索引/触发器三层保护固定 Space；IMMEDIATE 事务预占 id 再建目录；幂等初始化）
+- [x] 路由重写：workspaces / conversations（稳定 ID 寻址、一次性助教注入、steer/follow_up、set_model）/ cards / glossary / topics / prompts；统一 `HttpError` + `apiErrorHandler`
+- [x] 新增 `GET /api/models`（无凭据）、附件 `POST/GET /attachments`、`GET /attachments/:name`、`GET /file-index`
+- [x] 出口投影 `projection/client-view.ts`：HTTP 与 SSE 共用，前端永不见绝对路径
+- [x] Express 托管 `web/dist` + SPA fallback；API 404 保持 JSON
+- [x] web/：认证页、三栏布局、Space/Pi 树、统一新建面板、SSE reducer、Markdown+KaTeX+Mermaid、消息/工具折叠、输入框（IME/@/斜杠/附件/草稿/steer）、右侧提议池与固定助教、/settings 五 tab
+- [x] 验证脚本全部适配新 Schema，新增 `verify:schema`、`verify:attachments`
 
 **插件注册与工具开发跑通**（2026-09-07 验收）：PRD 见 `plugin-tools-mvp.md`。冒烟 75/75、run-real 真模型 4/4（agnes-2.5-flash）、注册断言 16/16。已随 730db5b 提交。
 

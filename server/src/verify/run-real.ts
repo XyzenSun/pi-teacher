@@ -1,162 +1,214 @@
+import Database from "better-sqlite3";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { openDatabase, closeDatabase } from "../db/connection.ts";
 import { initializeSchema } from "../db/schema.ts";
+import { createPiSession, sessionKeyFor } from "../session/repository.ts";
 import { startWorkspaceSession } from "../bridge/agent-session-wrapper.ts";
-import type { SessionToolContext } from "../tools/context.ts";
+import { toolContextFor } from "../tools/context.ts";
 
 /**
  * 真模型验证（PRD 验收清单核心项）：
- * 进程内走 bridge 层建 Pi 会话（startWorkspaceSession）→ 15 个工具注册
- * → 真实对话让模型调 topic_create + card_propose → 断言数据库出现对应行。
+ * 真实临时 SQLite + 真实目录 → 数据库建 Space/Pi Session 记录 → 进程内走
+ * bridge 层建 Pi 会话（startWorkspaceSession）→ 15 个工具注册 → 真实对话让
+ * 模型调 topic_create + card_propose → 断言数据库出现对应行、JSONL 落盘、
+ * bridge 事件可达。
  *
  * 走 wrapper（而非裸 session）的意义：这层是后端宿主的对外门面，事件转发、
  * 命令表、生命周期都在这里。真模型验证同时覆盖 bridge 事件可达性。
  *
+ * ADR-0030 适配要点：
+ * - 不再写 server/dev-data（那是旧用户数据目录）：每次跑用 mkdtemp 临时 home，
+ *   成功或失败都清理 wrapper 与数据库句柄，验证之间零残留。
+ * - 会话身份完全来自数据库：稳定 key 用 sessionKeyFor(row.id)，cwd 与
+ *   sessionDir 都是该 Pi Session 独占的 work_path，JSONL 复用建行时的 path。
+ * - 工具上下文由 toolContextFor(db, row) 构造，权限读 space.type。
+ *
  * 跑法：npm run verify
  * 前置（用户提供，禁止 mock）：
- *   - PI_TEACHER_PROVIDER  provider 名（如 openai / anthropic）
- *   - PI_TEACHER_MODEL     model id
- *   - API key 按该 provider 的惯例设环境变量（如 OPENAI_API_KEY）
+ *   - PI_TEACHER_PROVIDER  provider 名（默认 agnes）
+ *   - PI_TEACHER_MODEL     model id（默认 agnes-2.5-flash）
+ *   - API key 按该 provider 的惯例配置（~/.pi/agent/models.json 或环境变量）
  *
  * 会话事件流打到 stdout 便于观察模型的工具调用过程。
  */
 
-const DEV_ROOT = path.resolve(import.meta.dirname, "../../dev-data");
-const DB_PATH = path.join(DEV_ROOT, "pi-teacher.db");
-const WORKSPACE_ROOT = path.join(DEV_ROOT, "workspace");
+let passed = 0;
+let failed = 0;
+function check(name: string, condition: boolean, detail?: unknown): void {
+    if (condition) {
+        passed++;
+        console.log(`  ✓ ${name}`);
+    } else {
+        failed++;
+        console.error(`  ✗ ${name}`);
+        if (detail !== undefined) console.error(`    ${String(JSON.stringify(detail)).slice(0, 400)}`);
+    }
+}
+
+const EXPECTED_TOOLS = [
+    "card_propose", "card_list", "card_get", "card_delete", "card_merge",
+    "topic_create", "topic_list",
+    "glossary_propose", "glossary_list", "glossary_get",
+    "review_get_due_cards", "review_submit_ratings",
+    "md_get_outline", "md_get_section", "file_get_size_and_length",
+];
 
 async function main(): Promise<void> {
-    // 默认取 ~/.pi/agent/models.json 里已配置的 new-provider（用户提供），
-    // 可用环境变量覆盖换模型
-    const provider = process.env.PI_TEACHER_PROVIDER ?? "new-provider";
-    const modelId = process.env.PI_TEACHER_MODEL ?? "deepseek-normal-latest";
+    // 部署默认模型环境；只打印 provider/model 名，绝不打印凭据
+    const provider = process.env.PI_TEACHER_PROVIDER ?? "agnes";
+    const modelId = process.env.PI_TEACHER_MODEL ?? "agnes-2.5-flash";
+    process.env.PI_TEACHER_PROVIDER = provider;
+    process.env.PI_TEACHER_MODEL = modelId;
 
-    await fs.mkdir(WORKSPACE_ROOT, { recursive: true });
-    const db = openDatabase(DB_PATH);
-    initializeSchema(db);
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-verify-"));
+    // 自持句柄而非 db/connection.ts 单例：结束时确定性关闭并删除临时目录
+    const db = new Database(path.join(homeDir, "pi-teacher.db"));
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    db.pragma("busy_timeout = 5000");
 
-    // dev 硬编码学习会话上下文（PRD 对齐结论：接口对齐将来读 pi_session 行的查询）
-    const sessionContext: SessionToolContext = {
-        db,
-        spaceId: 1,
-        enableMakeCard: true,
-        reviewTopicId: null,
-        workspaceRoot: WORKSPACE_ROOT,
-    };
+    let wrapper: Awaited<ReturnType<typeof startWorkspaceSession>>["session"] | undefined;
+    try {
+        console.log("\n[1] 真实数据库与 Pi Session 记录");
+        initializeSchema(db, homeDir);
+        const spaceId = Number(db.prepare("INSERT INTO space (type, name) VALUES ('learn', '真模型验证空间')").run().lastInsertRowid);
+        const agentsMdId = (db.prepare("SELECT id FROM agents_md WHERE type = 'learn'").get() as { id: number }).id;
+        const teachStyleId = (db.prepare("SELECT id FROM teach_style ORDER BY id LIMIT 1").get() as { id: number }).id;
+        const piRow = createPiSession(db, homeDir, {
+            spaceId, agentsMdId, teachStyleId, enableMakeCard: true,
+        });
+        check("学习 Space 与 Pi Session 均由数据库建出", piRow.space_id === spaceId && piRow.space_type === "learn", {
+            spaceId, piId: piRow.id,
+        });
+        check("AGENTS.md 已投影到本对话目录", await fs.stat(path.join(piRow.work_path, "AGENTS.md")).then(() => true).catch(() => false));
+        check("style.md 已投影到本对话目录", await fs.stat(path.join(piRow.work_path, "style.md")).then(() => true).catch(() => false));
+        const headerBefore = await fs.readFile(piRow.path, "utf8");
+        check("建行时 JSONL 已写入 SDK header", headerBefore.includes("\"type\":\"session\""), headerBefore.slice(0, 120));
 
-    // —— 进程内走 bridge 建会话（cwd 契约：双参指工作区目录，PRD 实现要点 1）——
-    const { session: wrapper, realSessionId } = await startWorkspaceSession(
-        "pi-teacher-pi-session-id-dev-1",
-        WORKSPACE_ROOT,
-        sessionContext,
-    );
+        const sessionContext = toolContextFor(db, piRow);
+        check(
+            "工具上下文由数据库记录构造",
+            sessionContext.spaceType === "learn" && sessionContext.enableMakeCard === true
+                && sessionContext.workPath === piRow.work_path,
+            sessionContext.spaceType,
+        );
 
-    // —— 订阅 wrapper 事件（bridge 事件在 wrapper 层转发，这里是验证点）——
-    let assistantText = "";
-    const toolCalls: string[] = [];
-    const eventTypesSeen = new Set<string>();
-    wrapper.onEvent((event) => {
-        eventTypesSeen.add(event.type);
-        if (event.type === "message_end" && "message" in event) {
-            // AgentEvent 是 unknown 值字典：in 窄化后用局部变量访问，不跨形状强转
-            const message = event.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
-            if (message?.role === "assistant") {
-                for (const part of message.content ?? []) {
-                    if (part.type === "text" && part.text) assistantText += part.text;
+        // —— 进程内走 bridge 建会话（cwd/sessionDir 都是本 Pi Session 的 work_path）——
+        console.log("\n[2] bridge 建真实会话");
+        const stableKey = sessionKeyFor(piRow.id);
+        const started = await startWorkspaceSession(stableKey, piRow.work_path, sessionContext, {
+            sessionFile: piRow.path,
+        });
+        wrapper = started.session;
+        const { realSessionId } = started;
+        check("wrapper 的 cwd 是本 Pi Session 的 work_path", path.resolve(wrapper.cwd) === path.resolve(piRow.work_path), wrapper.cwd);
+        check("wrapper 复用数据库里的 JSONL 路径（不另开文件）", path.resolve(wrapper.sessionFile) === path.resolve(piRow.path), wrapper.sessionFile);
+        check("realSessionId 是稳定业务 key（重启后身份不变）", realSessionId === stableKey, { realSessionId, stableKey });
+
+        // —— 订阅 wrapper 事件（bridge 事件在 wrapper 层转发，这里是验证点）——
+        let assistantText = "";
+        const toolCalls: string[] = [];
+        const eventTypesSeen = new Set<string>();
+        wrapper.onEvent((event) => {
+            eventTypesSeen.add(event.type);
+            if (event.type === "message_end" && "message" in event) {
+                // AgentEvent 是 unknown 值字典：in 窄化后用局部变量访问，不跨形状强转
+                const message = event.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
+                if (message?.role === "assistant") {
+                    for (const part of message.content ?? []) {
+                        if (part.type === "text" && part.text) assistantText += part.text;
+                    }
                 }
             }
-        }
-        if (event.type === "tool_execution_start" && "toolName" in event) {
-            const name = event.toolName as string;
-            toolCalls.push(name);
-            console.log(`[tool_call] ${name}`);
-        }
-    });
+            if (event.type === "tool_execution_start" && "toolName" in event) {
+                const name = event.toolName as string;
+                toolCalls.push(name);
+                console.log(`[tool_call] ${name}`);
+            }
+        });
 
-    // —— 选模型并验证命令表 get_tools ——
-    const toolsResult = await wrapper.send({ type: "get_tools" }) as Array<{ name: string; active: boolean }>;
-    const activeToolNames = toolsResult.filter((t) => t.active).map((t) => t.name);
-    const expectedTools = [
-        "card_propose", "card_list", "card_get", "card_delete", "card_merge",
-        "topic_create", "topic_list",
-        "glossary_propose", "glossary_list", "glossary_get",
-        "review_get_due_cards", "review_submit_ratings",
-        "md_get_outline", "md_get_section", "file_get_size_and_length",
-    ];
-    const missingTools = expectedTools.filter((t) => !activeToolNames.includes(t));
-    if (missingTools.length > 0) {
-        console.error(`✗ 工具注册缺失：${missingTools.join(", ")}`);
-        console.error(`  实际工具列表：${activeToolNames.join(", ")}`);
-        process.exit(1);
+        // —— 命令表 get_tools：15 工具必须全部注册且 active ——
+        const toolsResult = await wrapper.send({ type: "get_tools" }) as Array<{ name: string; active: boolean }>;
+        const activeToolNames = toolsResult.filter((t) => t.active).map((t) => t.name);
+        const missingTools = EXPECTED_TOOLS.filter((t) => !activeToolNames.includes(t));
+        check(`15 个 pi-teacher 工具全部注册且 active（共 ${activeToolNames.length} 个可用）`, missingTools.length === 0, {
+            missingTools, activeToolNames,
+        });
+
+        await wrapper.send({ type: "set_model", provider, modelId });
+        // 只回显 provider/model 名；凭据不出现在任何输出里
+        console.log(`[model] 已设为 ${provider}/${modelId}`);
+        const state = await wrapper.send({ type: "get_state" }) as { model?: { id: string; provider: string } };
+        check("模型已就位（真实 SDK 模型运行时）", state.model?.provider === provider && state.model?.id === modelId, state.model);
+
+        // —— 真实对话：模型必须实际调工具落库 ——
+        console.log("\n[3] 真模型对话");
+        const userMessage =
+            "请完成两个操作：1. 创建一个名为「验证主题」的学习主题，描述写「真模型验证用」；" +
+            "2. 在这个主题下提议一张卡片，正面问「进程内 SDK 相比子进程的优势是什么」，" +
+            "背面答「复用宿主进程的扩展注册表与工具管线，无需跨进程通信」，制卡理由写「验证用」。";
+        console.log(`\n[用户] ${userMessage}\n`);
+        await wrapper.send({ type: "prompt", message: userMessage });
+
+        // 等运行结束：wrapper.isRunning() 直到空闲（prompt_done/agent_settled 已发）
+        const deadline = Date.now() + 180_000;
+        while (Date.now() < deadline && wrapper.isRunning()) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (toolCalls.length === 0) {
+            // 失败时把最后两条会话条目打出来（stopReason/errorMessage）——
+            // 真模型验证失败最常见原因是端点限流，条目里的 stopReason 能直接看出来
+            const entries = wrapper.inner.sessionManager.getEntries();
+            for (const entry of entries.slice(-2)) {
+                const message = (entry as { message?: { role?: string; stopReason?: string; errorMessage?: string } }).message;
+                if (message) console.error(`[失败诊断] role=${message.role} stopReason=${message.stopReason} errorMessage=${message.errorMessage ?? "无"}`);
+            }
+        }
+
+        console.log(`\n[助手] ${assistantText || "（无文本输出）"}`);
+        console.log(`\n[工具调用序列] ${toolCalls.join(" → ") || "（无）"}`);
+
+        // —— 验证：数据库断言 + JSONL + bridge 事件可达性 ——
+        console.log("\n[4] 断言：模型实际调工具并落库");
+        const topic = db.prepare("SELECT id, description FROM topic WHERE name = '验证主题'").get() as { id: number; description: string | null } | undefined;
+        check("topic_create 落库（模型实际调用）", topic !== undefined);
+        const card = topic
+            ? (db
+                  .prepare("SELECT status, front, reason_and_remark FROM card WHERE topic_id = ? ORDER BY id DESC LIMIT 1")
+                  .get(topic.id) as { status: string; front: string; reason_and_remark: string | null } | undefined)
+            : undefined;
+        check("card_propose 落库", card !== undefined);
+        check("卡片状态为 proposed（模型只有提案权）", card?.status === "proposed", card?.status);
+        check("模型调用了我们的工具（非自由文本回答）", toolCalls.some((t) => t === "card_propose" || t === "topic_create"), toolCalls);
+
+        console.log("\n[5] 断言：JSONL 与事件");
+        const jsonl = await fs.readFile(piRow.path, "utf8");
+        const jsonlLines = jsonl.trim().split("\n");
+        check("JSONL 落在本 Pi Session 目录且已追加对话条目", jsonlLines.length > 1, { file: piRow.path, lines: jsonlLines.length });
+        check("JSONL 首行仍是稳定 header（未被会话重写）", jsonl.startsWith(headerBefore.trim().split("\n")[0]));
+        const jsonlRoles = jsonlLines
+            .map((line) => { try { return JSON.parse(line) as { message?: { role?: string } }; } catch { return {}; } })
+            .map((entry) => entry.message?.role)
+            .filter((role): role is string => typeof role === "string");
+        check("JSONL 含用户与助手消息", jsonlRoles.includes("user") && jsonlRoles.includes("assistant"), [...new Set(jsonlRoles)]);
+
+        // bridge 事件可达性：wrapper 转发的事件应覆盖一轮完整对话的生命周期
+        const eventNames = Array.from(eventTypesSeen);
+        check("wrapper 转发 agent_start（run 开始）", eventNames.includes("agent_start"), eventNames);
+        check("wrapper 转发 message_end（助手消息完整）", eventNames.includes("message_end"));
+        check("wrapper 转发 tool_execution_start/end（工具真的跑了）",
+            eventNames.includes("tool_execution_start") && eventNames.includes("tool_execution_end"));
+        check("wrapper 转发 agent_settled（run 置空闲）", eventNames.includes("agent_settled"));
+        check("wrapper 转发 prompt_done（一轮结束）", eventNames.includes("prompt_done"));
+
+        console.log(`\n结果：${passed} 通过，${failed} 失败`);
+    } finally {
+        // 成功或失败都清理：先回收会话再关库删目录，别把 wrapper 挂在进程里
+        if (wrapper?.isAlive()) await wrapper.shutdown().catch(() => {});
+        db.close();
+        await fs.rm(homeDir, { recursive: true, force: true }).catch(() => {});
     }
-    console.log(`✓ 15 个工具全部注册（active: ${activeToolNames.length} 个）`);
-
-    await wrapper.send({ type: "set_model", provider, modelId });
-    console.log(`[model] 已设为 ${provider}/${modelId}`);
-
-    // —— 真实对话 ——
-    const userMessage =
-        "请完成两个操作：1. 创建一个名为「验证主题」的学习主题，描述写「真模型验证用」；" +
-        "2. 在这个主题下提议一张卡片，正面问「进程内 SDK 相比子进程的优势是什么」，" +
-        "背面答「复用宿主进程的扩展注册表与工具管线，无需跨进程通信」，制卡理由写「验证用」。";
-    console.log(`\n[用户] ${userMessage}\n`);
-    await wrapper.send({ type: "prompt", message: userMessage });
-
-    // 等运行结束：wrapper.isRunning() 直到空闲（prompt_done/agent_settled 已发）
-    const deadline = Date.now() + 180_000;
-    while (Date.now() < deadline && wrapper.isRunning()) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    if (toolCalls.length === 0) {
-        // 失败时把最后两条会话条目打出来（stopReason/errorMessage）——
-        // 真模型验证失败最常见原因是端点限流，条目里的 stopReason 能直接看出来
-        const entries = wrapper.inner.sessionManager.getEntries();
-        for (const entry of entries.slice(-2)) {
-            const message = (entry as { message?: { role?: string; stopReason?: string; errorMessage?: string } }).message;
-            if (message) console.error(`[失败诊断] role=${message.role} stopReason=${message.stopReason} errorMessage=${message.errorMessage ?? "无"}`);
-        }
-    }
-
-    console.log(`\n[助手] ${assistantText || "（无文本输出）"}`);
-    console.log(`\n[工具调用序列] ${toolCalls.join(" → ") || "（无）"}`);
-
-    // —— 验证：数据库断言 + bridge 事件可达性 ——
-    let passed = 0;
-    let failed = 0;
-    const check = (name: string, condition: boolean) => {
-        if (condition) {
-            passed++;
-            console.log(`  ✓ ${name}`);
-        } else {
-            failed++;
-            console.error(`  ✗ ${name}`);
-        }
-    };
-
-    console.log("\n[断言]");
-    const topic = db.prepare("SELECT id FROM topic WHERE name = '验证主题'").get() as { id: number } | undefined;
-    check("topic_create 落库（模型实际调用）", topic !== undefined);
-    const card = topic
-        ? (db
-              .prepare("SELECT status, front FROM card WHERE topic_id = ? ORDER BY id DESC LIMIT 1")
-              .get(topic.id) as { status: string; front: string } | undefined)
-        : undefined;
-    check("card_propose 落库", card !== undefined);
-    check("卡片状态为 proposed", card?.status === "proposed");
-    check("模型调用了我们的工具（非自由文本回答）", toolCalls.some((t) => t.startsWith("card_propose") || t.startsWith("topic_create")));
-
-    // bridge 事件可达性：wrapper 转发的事件应覆盖一轮完整对话的生命周期
-    const eventNames = Array.from(eventTypesSeen);
-    check("wrapper 转发 agent_start（run 开始）", eventNames.includes("agent_start"));
-    check("wrapper 转发 message_end（助手消息完整）", eventNames.includes("message_end"));
-    check("wrapper 转发 agent_settled（run 置空闲）", eventNames.includes("agent_settled"));
-
-    console.log(`\n结果：${passed} 通过，${failed} 失败`);
-
-    // 回收会话，避免 verify 结束把会话挂着
-    if (wrapper.isAlive()) await wrapper.shutdown();
-    closeDatabase();
     process.exit(failed > 0 ? 1 : 0);
 }
 
