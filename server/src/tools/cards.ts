@@ -77,7 +77,7 @@ export function createCardTopicTools(ctx: SessionToolContext): ToolDefinition[] 
                 );
             }
 
-            // 去重范围按 Topic（数据库设计.md）：同 Topic 内 front 归一化后重复即拒绝
+            // 去重范围按 Topic（数据库与目录结构设计.md）：同 Topic 内 front 归一化后重复即拒绝
             const existing = listTopicFronts(db, topic.id);
             const normalizedNew = normalizeFront(params.front);
             const duplicate = existing.find((f) => normalizeFront(f) === normalizedNew);

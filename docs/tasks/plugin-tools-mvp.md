@@ -8,7 +8,7 @@
 
 在 `tools-dev/server/` 下实现：
 
-1. **数据库层**——10 张表（`../数据库设计.md` 的 schema）、space 固定三行初始化
+1. **数据库层**——10 张表（`../数据库与目录结构设计.md` 的 schema）、space 固定三行初始化
 2. **FSRS 服务层**——ts-fsrs 封装：行 ↔ Card 映射、判定落库（`card_schedule` 更新 + `review_log` 写入）
 3. **插件层**——15 个前缀式命名自研工具（`card_*` / `topic_*` / `glossary_*` / `review_*` / `md_*` / `file_*`），可见性矩阵裁决，extensionFactories 工厂注册
 4. **验证脚本**——不起 Express，独立脚本进程内建 Pi 会话，确认工具注册成功、可被调用
@@ -20,7 +20,7 @@
 | 验收标准 | 独立脚本进程内建会话，**真模型（用户提供 API key，禁止 mock）**调通至少一个工具，业务闭环落库 |
 | 数据库位置 | dev 阶段 SQLite 落 `tools-dev/dev-data/pi-teacher.db`，不碰真实部署路径 `~/pi-teacher/` |
 | 会话上下文注入 | dev 脚本硬编码 `SessionToolContext`（spaceId、enableMakeCard、reviewTopicId），接口形状与将来读 `pi_session` 行的查询对齐，接真实查询时零改动 |
-| 多步学习 | 关闭（`learning_steps: [], relearning_steps: []`），`card_schedule`/`review_log` 不加列，详见 `../../数据库设计.md` topic 表说明 |
+| 多步学习 | 关闭（`learning_steps: [], relearning_steps: []`），`card_schedule`/`review_log` 不加列，详见 `../数据库与目录结构设计.md` topic 表说明 |
 | 工具命名 | 前缀式定稿（本 PRD 附录 A），不改 |
 
 ## 工程骨架
@@ -53,7 +53,7 @@ tools-dev/server/
 
 ## 实现要点（从设计文档继承，此处只列开发时容易做错的）
 
-1. **可见性矩阵**（`../../docs/工具定义.md`）：写入类（card_propose / topic_create / card_delete / card_merge / glossary_propose / review_get_due_cards / review_submit_ratings）在助教对话硬拒；制卡类还受 `enable_make_card` 开关控制。两种实现层：注册层（不注册）与执行层（注册了但拒绝）——**采用执行层拒绝**，注册全量：拒绝返回值里说明原因，模型能感知并调整，且与 ADR-0026「学习对话取卡不硬拒、返回值照常给」的既定行为一致。
+1. **可见性矩阵**（`../工具定义.md`）：写入类（card_propose / topic_create / card_delete / card_merge / glossary_propose / review_get_due_cards / review_submit_ratings）在助教对话硬拒；制卡类还受 `enable_make_card` 开关控制。两种实现层：注册层（不注册）与执行层（注册了但拒绝）——**采用执行层拒绝**，注册全量：拒绝返回值里说明原因，模型能感知并调整，且与 ADR-0026「学习对话取卡不硬拒、返回值照常给」的既定行为一致。
 2. **时间戳由代码填**：所有 `created_at` 等由 schema `DEFAULT (datetime('now'))` 或代码写入，工具 schema 里不出现时间参数。
 3. **归一化去重**（card_propose）：去首尾空白 + 压缩连续空白 + 统一中英文标点 + 忽略大小写。范围按 Topic。
 4. **merge 算法**：复制 `stability` 最低旧卡的调度状态；新卡 `status = 'normal'`；旧卡全部 `deleted`；整个动作在一个 SQLite 事务里。

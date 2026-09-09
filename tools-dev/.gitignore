@@ -1,6 +1,0 @@
-# dev 验证数据（冒烟测试每次重建）
-server/dev-data/
-
-# node 工件
-server/node_modules/
-server/dist/

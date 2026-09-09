@@ -1,6 +1,6 @@
 # 未决问题
 
-已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。
+已确认的决策见 [`adr/`](./adr/)，Schema 见 [`数据库与目录结构设计.md`](./数据库与目录结构设计.md)，领域语言见 [`CONTEXT.md`](./CONTEXT.md)。
 
 ## 当前第二阶段 UI / 配置打磨未决
 
@@ -23,7 +23,7 @@
 
 ## 真正未决的底层问题
 
-4. **`context` 事件返回值的容器格式。** 通道已定（见 `pi-hook机制调研.md`），注入项也已定（待复习卡数、当前使命摘要、最近学习记录），但用什么标记包裹还没定。`<system-reminder>` 是 Pi 内部在用的标记，复用可能与它自己的注入撞车。需要在实现时看一次真实 payload 再定。
+4. ~~**`context` 事件返回值的容器格式。**~~ 已决：用自有标记 `<pi-teacher-context>` 包裹，作为 `customType: "pi-teacher-context"` 的 custom 消息注入，不落 JSONL（`server/src/tools/factory.ts`）。不复用 `<system-reminder>`，避免与 Pi 自身注入撞车。
 
 5. **FSRS optimizer 空输入行为。** `fsrs-optimizer` 空输入是返回默认权重还是抛异常，需在实现时验证；若抛异常，接口层捕获并提示“记录不足，参数未改变”。
 
@@ -80,7 +80,7 @@
 | 到期卡积压 | 不调整 `due`，队列如实累积；另提供不经 AI 的 WebUI 手动复习 | ADR-0021 |
 | 每张卡耗时预估 | 不做。节奏偏好由用户与 AI 在对话中写进 `USER.md`，代码不约束 | ADR-0021 |
 | FSRS 训练的最少记录数 | 不设门槛，0 条也允许调用——记录不足时优化器本身不会改变权重 | ADR-0021 |
-| 卡片表字段 | 6 个字段 + `status` 三态，无 `answer_mode` 与 `metadata` | `数据库设计.md` |
+| 卡片表字段 | 6 个字段 + `status` 三态，无 `answer_mode` 与 `metadata` | `数据库与目录结构设计.md` |
 | 卡片溯源 | 不存消息 id 与对话外键，靠 `reason_and_remark` | ADR-0010 |
 | 卡片提议确认 UI | 批量确认与零星确认共用同一套交互 | 原对齐结论 |
 | 合并卡的判据与实现 | 纯提示词约束触发时机 + 合并工具做实际合并与 FSRS 状态更新，不让 AI 算 | `todo.md` |
@@ -94,10 +94,10 @@
 | 已掌握术语怎么给模型 | 不注入，`USER.md` 里写引导，AI 自主决定何时用数据库工具查 | ADR-0020 |
 | AGENTS.md 生成时机 | 新开 Pi Session 时从 `agents_md` 表整份投影到该 Pi Session 的 `work_path` | ADR-0030 |
 | Pi Session 工作目录 | `learn/<space-id>/pi/<pi-session-id>/`、`review/pi/<pi-session-id>/`、`ta/pi/<pi-session-id>/`；JSONL 平铺在 Pi Session 目录根部 | ADR-0030 |
-| 资料存哪、索引格式 | 全局 `materials/`，索引是 `index.md` 普通 Markdown，模型自读自写 | `数据库设计.md` |
+| 资料存哪、索引格式 | 全局 `materials/`，索引是 `index.md` 普通 Markdown，模型自读自写 | `数据库与目录结构设计.md` |
 | 资料抓取的上下文污染 | 交给子代理，`inheritContext: false` | ADR-0016 |
 | 学习计划 | 由 MISSION.md 承担，不做“每天学什么”的拆分 | `todo.md` |
-| 对话标题生成 | 后端独立 LLM 调用，写回 `pi_session.name` | `数据库设计.md` |
+| 对话标题生成 | 后端独立 LLM 调用，写回 `pi_session.name` | `数据库与目录结构设计.md` |
 | 助教会话压缩参数 | 保持 Pi 默认 | 原对齐结论 |
 
 ### 部署与运维

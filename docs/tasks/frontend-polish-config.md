@@ -385,7 +385,7 @@
 - **新增 ADR-0032**：WebUI 可编辑 Pi 模型/provider 配置的边界与 secret 处理原则（只出不进的脱敏、三态语义、原子写、缓存刷新、env 覆盖优先）。
 - **更新 `CONTEXT.md`**：Teach Style 条目改为「开始时选定，可在对话进行中切换」；Agents Md 保持不变。
 - **更新 `docs/open-questions.md`**：补入本阶段结论（设置为覆盖层 modal、日历只用真实聚合、JSON 编辑范围限定）。
-- **更新 `数据库设计.md`**：`enable_make_card` 与 `teach_style_id` 说明补上「可运行时修改」及其生效机制。
+- **更新 `数据库与目录结构设计.md`**：`enable_make_card` 与 `teach_style_id` 说明补上「可运行时修改」及其生效机制。
 - **不恢复** `docs/` 下此前被外部删除的四份设计文档。
 
 ## 8. 实现顺序

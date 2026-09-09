@@ -88,8 +88,6 @@ export const conversationsApi = {
   command: <T = unknown>(id: number, command: SessionCommand) => request<{ success: true; data: T }>(`/api/conversations/${id}/command`, json("POST", command)),
   close: (id: number) => request<{ success: true }>(`/api/conversations/${id}/close`, json("POST")),
   eventsUrl: (id: number) => `/api/conversations/${id}/events`,
-  attachments: (id: number) => request<{ attachments: Attachment[] }>(`/api/conversations/${id}/attachments`),
-  attachmentUrl: (id: number, name: string, inline = false) => `/api/conversations/${id}/attachments/${encodeURIComponent(name)}${inline ? "?inline=1" : ""}`,
   fileIndex: (id: number, q: string) => request<{ files: string[]; truncated: boolean }>(`/api/conversations/${id}/file-index${query({ q })}`),
   upload: async (id: number, file: File) => {
     const response = await fetch(`/api/conversations/${id}/attachments`, {

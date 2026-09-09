@@ -1,4 +1,4 @@
-/** 管理面板各子页共用的小部件：状态筛选条、状态徽标、日期格式化。 */
+/** 管理面板各子页共用的小部件：状态筛选条、状态徽标、日期格式化。Modal / Field 等统一在 ../ui/，避免两套视觉语义。 */
 
 export type StatusFilter = "all" | "proposed" | "normal" | "deleted";
 
@@ -26,14 +26,3 @@ export function formatDate(iso: string | null | undefined): string {
   const date = new Date(iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString("zh-CN", { hour12: false });
 }
-
-/** 新代码请从 ../ui/form.tsx 与 ../ui/Overlays.tsx 引入，旧 settings tab 仍保留此兼容出口。 */
-export { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
-export { Modal } from "../ui/Overlays.tsx";
-export type { ModalSize } from "../ui/Overlays.tsx";
-
-/**
- * Modal、Field 等实现统一在 ui 目录，避免 settings 与工作区出现两套视觉语义。
- * 本文件只保留状态类组件、日期格式化和旧 import 的 re-export。
- */
-

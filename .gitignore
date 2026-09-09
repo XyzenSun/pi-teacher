@@ -10,5 +10,4 @@ node_modules/
 dist/
 
 # dev 验证数据（冒烟测试每次重建）
-tools-dev/server/dev-data/
 server/dev-data/

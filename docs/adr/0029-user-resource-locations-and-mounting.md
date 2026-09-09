@@ -1,5 +1,7 @@
 # 用户资源目录与挂载约定
 
+> 状态：部分被 ADR-0030 取代——工作目录归属改为 Pi Session 独占；skill 位置、AGENTS.md / USER.md 分层与挂载约定仍有效。
+
 skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注入的统一约定。本文只定约定与机制事实，Dockerfile / compose 的具体实现留到部署任务再写。
 
 机制事实全部核实于 pi-coding-agent v0.84.2 源码（`dist/core/resource-loader.js`、`dist/core/skills.js`、`dist/core/package-manager.js`、`docs/skills.md`）。
@@ -10,7 +12,7 @@ skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注
 | --- | --- | --- |
 | 全局 AGENTS.md | `~/pi-teacher/AGENTS.md` | 祖先遍历让它在三个工作区全部自动注入（机制见下），业务资产不进系统层 |
 | 全局 USER.md | `~/pi-teacher/USER.md` | Pi 无原生 USER.md 机制，注入靠 AGENTS.md 引导句；放业务根与 materials/ 同层 |
-| 会话模板投影 | 各 Pi Session 的 `work_path`（如 `learn/2/pi/42/AGENTS.md`） | 沿用数据库设计.md 的 `agents_md` 投影约定；每个 Pi Session 独立投影 |
+| 会话模板投影 | 各 Pi Session 的 `work_path`（如 `learn/2/pi/42/AGENTS.md`） | 沿用数据库与目录结构设计.md 的 `agents_md` 投影约定；每个 Pi Session 独立投影 |
 | skills | `~/.pi/agent/skills/` | Pi 全局 skill 目录（机制见下），部署时目录挂载 |
 | 密钥 `.env` | `~/pi-teacher/.env` | 不随 skill 分发、不进镜像；env > .env，启动时单向同步 |
 
@@ -59,7 +61,7 @@ skills 目录挂载为宿主目录（`-v /host/skills/tavily-search:/root/.pi/ag
 
 ## 与现有文档的关系
 
-- `数据库设计.md`「agents_md 投影成工作区 AGENTS.md」——不变，且本 ADR 证实了该机制可用（祖先遍历 + cwd 投影最后注入）
+- `数据库与目录结构设计.md`「agents_md 投影成工作区 AGENTS.md」——不变，且本 ADR 证实了该机制可用（祖先遍历 + cwd 投影最后注入）
 - ADR-0014「静态内容走文件投影」——全局规则不进 agents_md 库（它是产品行为定义，改动等于发版；用户运行时可调的是模板与教学风格，已在库里），所以全局 AGENTS.md 是仓库里的静态文件，无投影通路
 - ADR-0027「能力扩展只有 skill 和插件两个载体」——本 ADR 补上 skill 的落点
 - `docs/open-questions.md` 里 AGENTS.md 机制的核实记录——本文是其部署形态的决议

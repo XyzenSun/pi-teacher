@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createPiSession } from "../session/repository.ts";
 import { projectAgentsMd, projectTeachStyle } from "../projection/agents-md.ts";
 
-const TA_TEMPLATE_PATH = fileURLToPath(new URL("../../../提示词设计/提示词模板/agentsmd/助教.md", import.meta.url));
+const TA_TEMPLATE_PATH = fileURLToPath(new URL("../../../docs/提示词设计/提示词模板/agentsmd/助教.md", import.meta.url));
 
 const LEARN_PROMPT = `# 学习职责
 你是 Pi Teacher 的学习老师。使用中文，围绕用户的目标进行清晰、有层次的讲解。

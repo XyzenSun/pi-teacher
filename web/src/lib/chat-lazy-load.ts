@@ -1,5 +1,5 @@
 // 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）lib/chat-lazy-load.ts。
-// 原始版权与许可见本仓库 THIRD-PARTY-NOTICES.md。
+// 原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。
 export const VISIBLE_PAGE_SIZE = 50;
 export const CHAT_SCROLL_TAIL_TOLERANCE = 8;
 export const CHAT_SCROLL_REATTACH_TOLERANCE = 96;
@@ -52,15 +52,3 @@ export function getLiveFollowAttached(
   return wasAttached;
 }
 
-export function getPromptAnchorSpacerHeight(
-  targetTop: number,
-  contentEnd: number,
-  clientHeight: number,
-): number {
-  const clampedTargetTop = Math.max(0, targetTop);
-  if (clampedTargetTop === 0) return 0;
-
-  return Math.max(0, Math.ceil(
-    clampedTargetTop + clientHeight - Math.max(0, contentEnd),
-  ));
-}

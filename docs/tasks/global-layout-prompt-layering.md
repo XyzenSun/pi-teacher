@@ -15,7 +15,7 @@
 4. 会话级用户偏好文件固定命名 `work_path/pi-session-user.md`，由 AI 在对话中自行创建和维护。程序**不提供 API、不投影、不读取、不注入其内容**，只在 `appendSystemPrompt` 里固定告诉模型：若当前目录含 `pi-session-user.md`，它是用户在本会话中对你的特殊要求；当察觉到用户提出只针对本会话而非全局的要求时，创建或维护此文件。
 5. 全局 `USER.md` 提供 WebUI 编辑：设置面板新增「用户偏好」Tab + `GET/PUT /api/config/user-preferences`。
 6. 会话级 `AGENTS.md` 默认模板（`LEARN_PROMPT` / `REVIEW_PROMPT`）与全局 `AGENTS.md` 去重：全局讲跨会话通用规则，会话级只讲该类型职责。
-7. 文档改名收尾：仓库内所有 `数据库设计.md` 引用改为 `数据库与目录结构设计.md`（README、CONTEXT、docs/、ADR、server 源码注释、tools-dev 历史文档），该文档一级标题同步改名，目录布局补上 `pi-session-user.md` 并标注 `USER.md` / `style.md` / `pi-session-user.md` 三者的注入方式。
+7. 文档改名收尾：仓库内所有 `数据库设计.md` 引用改为 `数据库与目录结构设计.md`（CONTEXT、docs/、ADR、server 源码注释），该文档一级标题同步改名，目录布局补上 `pi-session-user.md` 并标注 `USER.md` / `style.md` / `pi-session-user.md` 三者的注入方式。
 
 ### 不做什么
 
@@ -176,7 +176,7 @@ export function buildAppendedSystemPrompt(homeDir: string, workPath: string): st
 | `web/src/settings/SettingsOverlay.tsx` | 注册 Tab |
 | `web/src/app/HelpOverlay.tsx` | 补一条「用户偏好」说明 |
 | `数据库与目录结构设计.md` | 一级标题改名；目录布局补 `pi-session-user.md`；标注三种偏好文件的注入方式 |
-| `README.md`、`CONTEXT.md`、`docs/open-questions.md`、`docs/工具定义.md`、`docs/adr/0018 / 0020 / 0022 / 0028 / 0029 / 0030` | 引用改名 |
+| `CONTEXT.md`、`docs/open-questions.md`、`docs/工具定义.md`、`docs/adr/0018 / 0020 / 0022 / 0028 / 0029 / 0030` | 引用改名 |
 | `server/src/{db/schema,fsrs/service,routes/cards,routes/prompts,routes/glossary,routes/topics,tools/cards}.ts` | 注释里的引用改名 |
 | `tools-dev/CLAUDE.md`、`tools-dev/tasks/*.md`、`tools-dev/server/src/**` | 历史文档与冻结代码里的引用改名（只改字符串，不改行为） |
 

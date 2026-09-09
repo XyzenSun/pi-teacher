@@ -1,5 +1,5 @@
 // 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）lib/markdown.ts。
-// 原始版权与许可见本仓库 THIRD-PARTY-NOTICES.md。normalizeDisplayMath 把模型常见的
+// 原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。normalizeDisplayMath 把模型常见的
 // \[..\] / 粘连 $$ 写法归一成 remark-math 能解析的独立围栏行。
 import type { Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -348,19 +348,8 @@ export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkGfm, remarkGfmOptions],
   remarkMath,
 ];
-export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
-  [remarkFrontmatter, ["yaml"]],
-  [remarkGfm, remarkGfmOptions],
-  remarkMath,
-];
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
-  rehypeRaw,
-  [rehypeSanitize, markdownSanitizeSchema],
-  [rehypeKatex, { throwOnError: false, strict: false }],
-];
-
-export const markdownPreviewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   [rehypeKatex, { throwOnError: false, strict: false }],

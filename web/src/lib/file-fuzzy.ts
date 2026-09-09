@@ -1,5 +1,5 @@
 // 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）lib/file-fuzzy.ts。
-// 原始版权与许可见本仓库 THIRD-PARTY-NOTICES.md。
+// 原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。
 // Pure helpers for the chat input's @ file autocomplete. Mirrors the pi TUI's
 // behavior: @ triggers at line start or after whitespace, entries are ranked
 // with the TUI's scoreEntry ladder, and completions insert "@relative/path ".
@@ -89,7 +89,7 @@ function isSubsequence(needle: string, haystack: string): boolean {
 /**
  * TUI scoreEntry ladder (exact 100 / prefix 80 / substring 50 / path substring
  * 30, directories +10) plus a low-weight subsequence fallback so genuinely
- * fuzzy queries like "chinp" still find components/ChatInput.tsx.
+ * fuzzy queries like "chinp" still find src/chat/ChatInput.tsx.
  *
  * Queries containing "/" are ranked against the full relative path instead of
  * the basename — this is what makes drill-down work: after inserting "@src/",
@@ -165,27 +165,4 @@ export function buildAtInsertText(entryPath: string, isDir: boolean, forceQuotes
   }
   const text = needsQuotes ? `@"${p}" ` : `@${p} `;
   return { text, cursorOffset: text.length };
-}
-
-/**
- * Closed @mention for one-shot inserts (e.g. the file explorer's @ button).
- * Unlike buildAtInsertText there is no drill-down: directories are closed
- * too, with a trailing "/" and a trailing space.
- */
-export function buildAtMentionText(entryPath: string, isDir: boolean): string {
-  const p = isDir ? `${entryPath}/` : entryPath;
-  return p.includes(" ") ? `@"${p}" ` : `@${p} `;
-}
-
-/** Closed file @mention scoped to one logical line or an inclusive line range. */
-export function buildFileLineMentionText(entryPath: string, startLine: number, endLine: number): string {
-  const firstLine = Math.max(1, Math.min(startLine, endLine));
-  const lastLine = Math.max(1, Math.max(startLine, endLine));
-  const pathMention = entryPath.includes(" ") ? `@"${entryPath}"` : `@${entryPath}`;
-  const lineSuffix = firstLine === lastLine ? `:${firstLine}` : `:${firstLine}-${lastLine}`;
-  return `${pathMention}${lineSuffix} `;
-}
-
-export function buildFileAtMentionsText(entryPaths: string[]): string {
-  return entryPaths.map((entryPath) => buildAtMentionText(entryPath, false)).join("");
 }

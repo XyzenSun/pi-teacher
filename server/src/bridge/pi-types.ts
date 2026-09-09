@@ -1,6 +1,6 @@
 // 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）。
 // pi-teacher 后端宿主按 PRD backend-host-mvp 直接拷贝并按需微调，
-// 感谢 pi-web 作者。原始版权与许可见本仓库 THIRD-PARTY-NOTICES.md。
+// 感谢 pi-web 作者。原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。
 import type {
   AgentSessionEvent,
   BashOperations,

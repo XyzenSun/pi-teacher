@@ -4,7 +4,7 @@ import type Database from "better-sqlite3";
 /**
  * FSRS 调度服务：行 ↔ Card 映射、判定落库（card_schedule 更新 + review_log 写入）。
  *
- * 关键约定（数据库设计.md topic 表）：
+ * 关键约定（数据库与目录结构设计.md topic 表）：
  * - learning_steps / relearning_steps 固定为 []（关多步学习）——任何判定路径
  *   最短间隔 24h，一张卡一天最多出现一次
  * - ts-fsrs 的 Card.learning_steps 字段恒为 0，映射层直接丢弃（不建列）

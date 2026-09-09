@@ -2,7 +2,7 @@
  * 卡片路由：管理面板 Card 子页（全部 / 待审批 / 正常卡 / 回收站）与右侧提议池
  * 共用同一套接口（tools-dev/tasks/frontend-webui-mvp.md §2.7、§2.8）。
  *
- * 状态机（数据库设计.md「status 三档」）：
+ * 状态机（数据库与目录结构设计.md「status 三档」）：
  *   proposed --confirm--> normal --delete--> deleted --restore--> normal | proposed
  *   proposed --reject--> deleted
  *   手动新建 --> normal（用户意图本身即确认，见 ADR-0009）
@@ -12,7 +12,7 @@
  * 「改状态」与「建/保留调度」是同一个业务动作，全部放进事务，避免出现
  * normal 却无调度行（复习队列取不到）这种半成品。
  *
- * 卡面一律不返回 source_essence_path：它是部署机上的绝对路径（数据库设计.md
+ * 卡面一律不返回 source_essence_path：它是部署机上的绝对路径（数据库与目录结构设计.md
  * card 表），前端只需要知道「有没有精华来源」，故只投出 has_source_essence。
  */
 import { Router } from "express";
@@ -22,7 +22,7 @@ import type { AppState } from "./app-state.ts";
 import { createInitialSchedule } from "../fsrs/service.ts";
 import { HttpError, readBody, readId, readNullableText, readText } from "./http.ts";
 
-/** card 与 glossary 共用的三档状态（数据库设计.md：两张表的 status 完全同构）。 */
+/** card 与 glossary 共用的三档状态（数据库与目录结构设计.md：两张表的 status 完全同构）。 */
 const TRI_STATE_VALUES = new Set(["proposed", "normal", "deleted"]);
 
 export type TriStateFilter = "proposed" | "normal" | "deleted" | "all";
@@ -238,7 +238,7 @@ export function createCardsRouter(state: AppState): Router {
     res.json({ success: true, changed, card: selectCardView(db, cardId) });
   });
 
-  // POST /api/cards/:id/delete —— 软删。调度行保留（数据库设计.md：恢复后进度原样回来）
+  // POST /api/cards/:id/delete —— 软删。调度行保留（数据库与目录结构设计.md：恢复后进度原样回来）
   router.post("/:id/delete", (req: Request, res: Response) => {
     const cardId = readId(req.params.id, "id");
     const softDelete = db.transaction(() => {

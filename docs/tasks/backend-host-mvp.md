@@ -92,11 +92,11 @@ server/
 
 1. **cwd 契约**（ADR-0029）：创建会话必须 `SessionManager.create(工作区目录, 工作区目录)`，cwd 退化 = 全局 AGENTS.md 注入失效。wrapper 构造函数的第一参数校验点。
 2. **SessionToolContext 装配**：开对话路由从 `pi_session` 行读 space_id / enable_make_card / review_topic_id 构造上下文（tools-dev 是硬编码，接口形状已对齐），传入 `createPiTeacherExtension`，经 `createAgentSessionServices({ resourceLoaderOptions: { extensionFactories } })`。**生产宿主 noSkills 等开关全开**（与 run-real 的全关相反）。
-3. **SSE 帧格式**：无名事件 `data: {json}\n\n`，type 字段区分；心跳注释帧 `:\n\n` 每 30s；连接先发一帧 `:\n\n` 刷头。握手 `connected` 区分「EventSource open」与「agent 就绪」；`startup_error` 让客户端停止重连。调研文档 `../docs/pi-web-研究/01-桥接层.md` §3/§4 是权威转写（与最新源码逐字节吻合）。
+3. **SSE 帧格式**：无名事件 `data: {json}\n\n`，type 字段区分；心跳注释帧 `:\n\n` 每 30s；连接先发一帧 `:\n\n` 刷头。握手 `connected` 区分「EventSource open」与「agent 就绪」；`startup_error` 让客户端停止重连。调研文档 `../pi-web-研究/01-桥接层.md` §3/§4 是权威转写（与最新源码逐字节吻合）。
 4. **prompt 串行化**：wrapper 的 prompt 准入队列——同一会话并发 POST 只有一个在跑，其余排队（pi-web rpc-manager 已有，裁剪时保留）。preflightResult 两段式 ack 保留。
 5. **空闲回收**：10 分钟（`resetIdleTimer`），运行中不回收；进程信号（SIGTERM/SIGINT）优雅退出（先 session_shutdown 再 dispose）。可配置（环境变量），默认 10 分钟。
 6. **注册表形态**：模块级 `Map`（ADR-0024 简化决定），不用 globalThis。启动锁（同 id 并发 start 合并为一个 promise）保留。
-7. **投影时机**：开对话时整份覆盖写 AGENTS.md / style.md（数据库是源，文件是投影，ADR-0014）。并发对话覆盖冲突**不处理**（数据库设计.md 已定：概率低后果轻）。
+7. **投影时机**：开对话时整份覆盖写 AGENTS.md / style.md（数据库是源，文件是投影，ADR-0014）。并发对话覆盖冲突**不处理**（数据库与目录结构设计.md 已定：概率低后果轻）。
 8. **认证流**：首启动 user 表空 → `GET /api/auth/status` 返回 `needs-setup`，前端进设密码页 → `POST /api/auth/setup`（仅表空时可用）→ 登录。cookie：签名 HttpOnly（crypto 自签 HMAC，无第三方依赖）。登录失败响应不区分「用户名错」与「密码错」。
 9. **安全模块照拷**：request-security 的 Host 白名单 + Origin/sec-fetch-site 校验（改写成 Express 中间件）、path-security 的路径穿越双段校验。先信任校验后认证（不合法的 Host 连 401 都不给）。
 10. **标题生成**：独立 LLM 调用（pi-web session-title.ts 的时机与 prompt 原文），用 pi_session 行存结果。模型配置复用 `~/.pi/agent/models.json`（与主对话同 provider）。

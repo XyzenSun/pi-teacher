@@ -84,7 +84,6 @@ export interface ModelInfo { provider: string; id: string; name: string }
 export interface ModelsResponse { models: ModelInfo[]; defaultModel: { provider: string; id: string } | null }
 
 export interface Attachment { id: string; relativePath: string; name: string; mimeType: string; size: number }
-export interface FileIndexEntry { path: string; type?: string; size?: number }
 
 export interface Topic {
   id: number;
@@ -127,15 +126,6 @@ export interface TeachStyle { id: number; name: string; description: string | nu
 export interface PromptsResponse { agentsMd: AgentsMd[]; teachStyles: TeachStyle[] }
 
 export interface SlashCommand { name: string; description: string }
-export interface SessionState {
-  isStreaming: boolean;
-  isRunning: boolean;
-  isCompacting: boolean;
-  model?: { id: string; provider: string };
-  pendingMessageCount: number;
-  contextUsage: { percent: number; contextWindow: number; tokens: number } | null;
-  thinkingLevel: string;
-}
 
 /** 复习排期：全部字段都能由 card_schedule / review_log 复算，无估算指标。 */
 export interface ReviewScheduleResponse {

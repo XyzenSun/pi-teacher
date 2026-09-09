@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { seedApplication } from "./seed.ts";
 
 /**
- * 建表与初始化数据，schema 以 ../../../../数据库设计.md 为准。
+ * 建表与初始化数据，schema 以 docs/数据库与目录结构设计.md 为准。
  *
  * 注意：FSRS 的 learning_steps/relearning_steps 由代码固定为 []（关多步学习，
  * 见该文档 topic 表说明），不建列——ts-fsrs 的 Card.learning_steps 恒为 0，

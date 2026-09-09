@@ -42,10 +42,6 @@ export function useWorkspaceRoute(): WorkspaceRoute {
   return parseWorkspacePath(useLocation().pathname);
 }
 
-export function useWorkspaceBasePath(): string {
-  return useWorkspaceRoute().basePath;
-}
-
 /** 覆盖层入口统一用这个函数拼路径，避免各处手写字符串拼接出错。 */
 export function overlayPath(basePath: string, overlay: OverlayKind, search?: string): string {
   return `${basePath}/${overlay}${search ?? ""}`;

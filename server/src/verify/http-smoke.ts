@@ -13,6 +13,24 @@ import { getPiSession, sessionKeyFor } from "../session/repository.ts";
 /** 真实 Express、SQLite、文件与模型；不写 server/dev-data 或用户的部署数据。 */
 let passed = 0;
 let skipped = 0;
+/** 真实 provider payload 里逐条消息检查信封：只有非 assistant 消息携带才算我们注入的证据。 */
+function payloadHasNonAssistantEnvelope(payloadJson: string, envelope: string): boolean {
+  let payload: { messages?: Array<{ role?: string; content?: unknown }> };
+  try {
+    payload = JSON.parse(payloadJson);
+  } catch {
+    return payloadJson.includes(envelope);
+  }
+  if (!Array.isArray(payload.messages)) return payloadJson.includes(envelope);
+  return payload.messages.some((message) => message.role !== "assistant" && JSON.stringify(message.content ?? "").includes(envelope));
+}
+
+/** 失败诊断只看命中点前后的片段：payload 开头永远是系统提示词，截前 300 字看不出泄漏来自哪条消息。 */
+function excerptAround(text: string, needle: string, radius = 220): string {
+  const at = text.indexOf(needle);
+  return at < 0 ? text.slice(0, radius) : text.slice(Math.max(0, at - radius), at + needle.length + radius);
+}
+
 function check(name: string, condition: unknown): asserts condition {
   assert.ok(condition, name);
   console.log(`  ✓ ${name}`);
@@ -258,9 +276,10 @@ async function main(): Promise<void> {
     const originalOnPayload = taAgent.onPayload;
     taAgent.onPayload = async (payload, model) => { payloads.push(JSON.stringify(payload)); return originalOnPayload?.(payload, model); };
     await prompt(taId, "只回复“准备好了”，不调用工具。");
-    // 断言注入信封本身而不是简介里的字样：真模型可能在回答里复述主会话名甚至提到
-    // 标签名，那属于模型输出；只有带尖括号的 <pi-teacher-context> 信封是我们注入的证据。
-    const injectedPayloads = () => payloads.filter((payload) => payload.includes("<pi-teacher-context>"));
+    // 断言注入信封本身而不是简介里的字样，且只看非 assistant 消息：真模型可能在回答里
+    // 复述主会话名甚至照抄 <pi-teacher-context> 标签，这段文字会随历史进入后续每轮 payload，
+    // 属于模型输出而不是我们的注入；我们的信封总以 custom→user 侧消息出现。
+    const injectedPayloads = () => payloads.filter((payload) => payloadHasNonAssistantEnvelope(payload, "<pi-teacher-context>"));
     check("助教默认没有注入主会话上下文", injectedPayloads().length === 0);
     payloads.length = 0;
     await prompt(taId, "若当前输入有授权简介，只回复“已读取”，不复述简介，不调用工具。", { injectMainSessionId: id });
@@ -269,7 +288,7 @@ async function main(): Promise<void> {
     await prompt(taId, "这轮只回复“完成”，不调用工具。");
     const leakedPayloads = injectedPayloads();
     check(
-      `下一轮不再注入主会话简介${leakedPayloads.length ? `（意外命中片段：${leakedPayloads[0].slice(0, 300)}）` : ""}`,
+      `下一轮不再注入主会话简介${leakedPayloads.length ? `（意外命中片段：${excerptAround(leakedPayloads[0], "<pi-teacher-context>")}）` : ""}`,
       leakedPayloads.length === 0,
     );
     // 注入是 context 钩子里临时拼进请求 payload 的，不该写进 JSONL。逐条解析而不是整文件

@@ -1,14 +1,14 @@
 /**
  * 提示词库路由：agents_md 与 teach_style 的增删改查（管理面板两个子页）。
  *
- * 两库正交（数据库设计.md）：agents_md 定「做什么」并用 type 区分适用会话类型，
+ * 两库正交（数据库与目录结构设计.md）：agents_md 定「做什么」并用 type 区分适用会话类型，
  * teach_style 定「怎么说话」。它们是文件的源，不是文件的镜像——改这里的 prompt
  * 只影响**后续新建**的 Pi Session：投影发生在开对话那一刻（projection/agents-md.ts），
  * 已有对话的 work_path/AGENTS.md、style.md 不回写、不重投影，历史对话当时用的是
  * 哪套提示词由 pi_session.agents_md_id 这个外键追溯。接口在响应里如实告知这一点，
  * 避免前端把「保存成功」讲成「当前对话已切换」。
  *
- * ta 模板是全局唯一的一行（数据库设计.md「type 字段」）：助教对话直接取它，不给
+ * ta 模板是全局唯一的一行（数据库与目录结构设计.md「type 字段」）：助教对话直接取它，不给
  * 用户选，因此本路由不允许新建 ta 模板、不允许删除 ta 模板、也不允许把任何模板的
  * type 改成 ta 或把 ta 改成别的类型——它的 type 就是它的身份。
  */
@@ -149,7 +149,7 @@ export function createPromptsRouter(state: AppState): Router {
           throw new HttpError(409, "助教模板的类型不可更改，其他模板也不能改成助教类型");
         }
         // 已被对话引用时换类型会让历史 pi_session 的「模板类型 = Space 类型」失配，
-        // 而这个外键是事后追溯凭据（数据库设计.md）：要换类型请另建一个模板
+        // 而这个外键是事后追溯凭据（数据库与目录结构设计.md）：要换类型请另建一个模板
         const usageCount = countSessionsUsingAgentsMd(db, id);
         if (usageCount > 0) {
           throw new HttpError(
@@ -184,7 +184,7 @@ export function createPromptsRouter(state: AppState): Router {
     }
     const usageCount = countSessionsUsingAgentsMd(db, id);
     if (usageCount > 0) {
-      throw new HttpError(409, `该模板被 ${usageCount} 个对话引用，不能删除（历史追溯凭据，见数据库设计.md）`);
+      throw new HttpError(409, `该模板被 ${usageCount} 个对话引用，不能删除（历史追溯凭据，见数据库与目录结构设计.md）`);
     }
     db.prepare("DELETE FROM agents_md WHERE id = ?").run(id);
     res.json({ success: true });
