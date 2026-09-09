@@ -1,6 +1,7 @@
 import type {
-  AgentsMd, Attachment, Card, Conversation, GlossaryTerm, ModelsResponse, PromptsResponse, Runtime,
-  SessionContext, Space, TeachStyle, Topic, TriState, WorkspacesResponse,
+  AgentsMd, Attachment, Card, Conversation, DefaultModelConfig, GlossaryTerm, ModelsConfigResponse,
+  ModelsResponse, PiSettingsResponse, PromptsResponse, ProviderConfigView, ProviderPatch,
+  ReviewScheduleResponse, Runtime, SessionContext, Space, TeachStyle, Topic, TriState, WorkspacesResponse,
 } from "./types.ts";
 
 /** 后端错误统一带 status 与可选 code；`session_recycled` 由对话页专门处理。 */
@@ -44,6 +45,10 @@ export const authApi = {
   setup: (username: string, password: string) => request<{ success: true; username: string }>("/api/auth/setup", json("POST", { username, password })),
   login: (username: string, password: string) => request<{ success: true; username: string }>("/api/auth/login", json("POST", { username, password })),
   logout: () => request<{ success: true }>("/api/auth/logout", json("POST")),
+  changeUsername: (username: string, currentPassword: string) =>
+    request<{ success: true; username: string }>("/api/auth/username", json("PATCH", { username, currentPassword })),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ success: true }>("/api/auth/password", json("PATCH", { currentPassword, newPassword })),
 };
 
 export const workspacesApi = {
@@ -71,6 +76,12 @@ export type SessionCommand =
 
 export const conversationsApi = {
   create: (input: CreateConversationInput) => request<{ success: true; conversation: Conversation; runtime: Runtime }>("/api/conversations", json("POST", input)),
+  setOptions: (id: number, input: { enableMakeCard: boolean }) =>
+    request<{ success: true; conversation: Conversation }>(`/api/conversations/${id}/options`, json("PATCH", input)),
+  setTeachStyle: (id: number, teachStyleId: number | null) =>
+    request<{ success: true; reloaded: boolean; conversation: Conversation; runtime: Runtime }>(
+      `/api/conversations/${id}/teach-style`, json("PATCH", { teachStyleId }),
+    ),
   open: (id: number) => request<{ success: true; conversation: Conversation; runtime: Runtime }>(`/api/conversations/${id}/open`, json("POST")),
   status: (id: number) => request<Runtime>(`/api/conversations/${id}/status`),
   context: (id: number, options: { tail?: number; before?: string } = {}) => request<SessionContext>(`/api/conversations/${id}/context${query(options)}`),
@@ -127,12 +138,38 @@ export const glossaryApi = {
   restore: (id: number) => request<{ success: true }>(`/api/glossary/${id}/restore`, json("POST")),
 };
 
-export const promptsApi = {
-  list: (type?: string) => request<PromptsResponse>(`/api/prompts${query({ type })}`),
+export const promptsApi = {  list: (type?: string) => request<PromptsResponse>(`/api/prompts${query({ type })}`),
   createAgentsMd: (input: { type: string; name: string; description?: string | null; prompt: string }) => request<{ success: true; agentsMd: AgentsMd }>("/api/prompts/agents-md", json("POST", input)),
   updateAgentsMd: (id: number, input: { name?: string; description?: string | null; prompt?: string }) => request<{ success: true; notice: string; agentsMd: AgentsMd }>(`/api/prompts/agents-md/${id}`, json("PATCH", input)),
   removeAgentsMd: (id: number) => request<{ success: true }>(`/api/prompts/agents-md/${id}`, { method: "DELETE" }),
   createTeachStyle: (input: { name: string; description?: string | null; prompt: string }) => request<{ success: true; teachStyle: TeachStyle }>("/api/prompts/teach-style", json("POST", input)),
   updateTeachStyle: (id: number, input: { name?: string; description?: string | null; prompt?: string }) => request<{ success: true; notice: string; teachStyle: TeachStyle }>(`/api/prompts/teach-style/${id}`, json("PATCH", input)),
   removeTeachStyle: (id: number) => request<{ success: true }>(`/api/prompts/teach-style/${id}`, { method: "DELETE" }),
+};
+
+export const reviewScheduleApi = {
+  get: (options: { upcomingDays?: number; historyDays?: number; topicId?: number | null } = {}) =>
+    request<ReviewScheduleResponse>(`/api/review-schedule${query(options)}`),
+};
+
+/** Pi 配置：出口已脱敏，apiKey 只有布尔与固定掩码，提交遵循三态语义。 */
+export const configApi = {
+  models: () => request<ModelsConfigResponse>("/api/config/models"),
+  providerJson: (providerId: string) =>
+    request<{ provider: Record<string, unknown>; secretMask: string }>(`/api/config/models/${encodeURIComponent(providerId)}/json`),
+  saveProvider: (providerId: string, patch: ProviderPatch) =>
+    request<{ success: true; provider: ProviderConfigView; warnings: string[] }>(
+      `/api/config/models/${encodeURIComponent(providerId)}`, json("PATCH", patch),
+    ),
+  saveProviderJson: (providerId: string, value: unknown) =>
+    request<{ success: true; provider: ProviderConfigView; warnings: string[] }>(
+      `/api/config/models/${encodeURIComponent(providerId)}`, json("PATCH", { json: value }),
+    ),
+  removeProvider: (providerId: string) =>
+    request<{ success: true }>(`/api/config/models/${encodeURIComponent(providerId)}`, { method: "DELETE" }),
+  setDefaultModel: (provider: string, modelId: string) =>
+    request<{ success: true; defaultModel: DefaultModelConfig }>("/api/config/default-model", json("PATCH", { provider, modelId })),
+  settings: () => request<PiSettingsResponse>("/api/config/settings"),
+  saveSettings: (patch: { defaultProvider?: string | null; defaultModel?: string | null; retryEnabled?: boolean }) =>
+    request<{ success: true; settings: PiSettingsResponse["settings"]; defaultModel: DefaultModelConfig }>("/api/config/settings", json("PATCH", patch)),
 };

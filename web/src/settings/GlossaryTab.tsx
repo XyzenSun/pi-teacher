@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { glossaryApi } from "../api/client.ts";
 import type { GlossaryTerm } from "../api/types.ts";
-import { ErrorLine, Field, formatDate, Modal, StatusChip, StatusFilterBar, useSubmit, type StatusFilter } from "./shared.tsx";
+import { formatDate, StatusChip, StatusFilterBar, type StatusFilter } from "./shared.tsx";
+import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { Modal } from "../ui/Overlays.tsx";
 
 function TermForm({ initial, title, onSubmit, onClose }: { initial: { term: string; definition: string }; title: string; onSubmit: (state: { term: string; definition: string }) => Promise<void>; onClose: () => void }) {
   const [state, setState] = useState(initial);
   const { busy, error, run } = useSubmit();
   return (
-    <Modal title={title} onClose={onClose}>
-      <Field label="术语"><input className="input" value={state.term} onChange={(event) => setState({ ...state, term: event.target.value })} /></Field>
-      <Field label="定义"><textarea className="input" rows={5} value={state.definition} onChange={(event) => setState({ ...state, definition: event.target.value })} /></Field>
-      <ErrorLine error={error} />
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
-        <button type="button" className="btn-primary" disabled={busy || !state.term.trim() || !state.definition.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy || !state.term.trim() || !state.definition.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="术语"><input className="input" value={state.term} onChange={(event) => setState({ ...state, term: event.target.value })} /></Field>
+        <Field label="定义"><textarea className="input" rows={5} value={state.definition} onChange={(event) => setState({ ...state, definition: event.target.value })} /></Field>
+        <ErrorLine error={error} />
       </div>
     </Modal>
   );

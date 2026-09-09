@@ -37,12 +37,12 @@ export function AssistantPanel({ taSessionId, mainConversationId }: AssistantPan
   };
 
   return (
-    <div className="flex flex-col min-h-0 flex-1 border-t border-line">
-      <div className="px-4 py-2.5 border-b border-line flex items-center justify-between">
+    <div className="flex flex-col min-h-0 flex-1">
+      <div className="h-11 shrink-0 px-3 border-b border-line flex items-center justify-between">
         <span className="label flex items-center gap-1"><span className="icon text-[16px] text-secondary">support_agent</span>助教</span>
         <span className="text-[11px] text-muted">{session.status === "connected" ? "已连接" : session.status === "recycled" ? "已回收" : session.status === "reconnecting" ? "重连中" : "连接中"}</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 text-[13px]">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-[13px]">
         {session.error && (
           <div className="rounded-md bg-error-container text-on-error-container px-2 py-1 text-[12px] flex items-center justify-between gap-2">
             <span className="truncate">{session.error}</span>
@@ -53,7 +53,7 @@ export function AssistantPanel({ taSessionId, mainConversationId }: AssistantPan
         {recent.map((message, index) => <MessageView key={index} message={message} conversationId={taSessionId} toolResults={toolResults} executions={session.toolExecutions} />)}
         {session.streaming.streamingMessage && <MessageView message={session.streaming.streamingMessage} conversationId={taSessionId} toolResults={toolResults} executions={session.toolExecutions} streaming />}
       </div>
-      <div className="p-3 border-t border-line space-y-2">
+      <div className="shrink-0 p-3 border-t border-line space-y-2 bg-surface-container-lowest/60">
         {error && <div className="text-[12px] text-error">{error}</div>}
         <textarea
           className="input resize-none text-[13px]"

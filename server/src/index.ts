@@ -18,6 +18,8 @@ import { createModelsRouter } from "./routes/models.ts";
 import { createCardsRouter } from "./routes/cards.ts";
 import { createGlossaryRouter } from "./routes/glossary.ts";
 import { createTopicsRouter } from "./routes/topics.ts";
+import { createReviewScheduleRouter } from "./routes/review-schedule.ts";
+import { createConfigRouter } from "./routes/config.ts";
 import { createPromptsRouter } from "./routes/prompts.ts";
 import { apiErrorHandler } from "./routes/http.ts";
 import type { AppState } from "./routes/app-state.ts";
@@ -67,6 +69,8 @@ export async function buildApp(options: ServerOptions = {}) {
     app.use("/api/cards", createCardsRouter(state));
     app.use("/api/glossary", createGlossaryRouter(state));
     app.use("/api/topics", createTopicsRouter(state));
+    app.use("/api/review-schedule", createReviewScheduleRouter(state));
+    app.use("/api/config", createConfigRouter(state));
     app.use("/api/prompts", createPromptsRouter(state));
     app.use("/api", (_req, res) => { res.status(404).json({ error: "API 不存在" }); });
 

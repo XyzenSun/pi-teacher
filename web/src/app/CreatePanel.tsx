@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { conversationsApi } from "../api/client.ts";
 import { useWorkspace } from "./WorkspaceContext.tsx";
+import { Modal } from "../ui/Overlays.tsx";
 
 export type CreateIntent =
   | { kind: "generic" }
@@ -14,8 +15,10 @@ interface CreatePanelProps {
 }
 
 /**
- * 统一新建面板：学习需要选学习 Space + learn 模板 + 可选教学风格 + 制卡开关；
+ * 统一新建面板：学习需要选学习 Space + learn 模板 + 可选教学风格；
  * 复习固定落到 review Space，选 review 模板 + Topic（null = 全部）。
+ * 制卡开关对学习与复习都开放（复习中遇到薄弱点同样需要补卡），默认开启；
+ * 助教会话不从这里创建，其制卡权限由后端恒定关闭。
  * 创建成功后直接进入对话；模型不在此处选择（用 set_model 命令切换）。
  */
 export function CreatePanel({ intent, onClose, onCreated }: CreatePanelProps) {
@@ -61,7 +64,7 @@ export function CreatePanel({ intent, onClose, onCreated }: CreatePanelProps) {
         agentsMdId,
         teachStyleId,
         reviewTopicId: mode === "review" ? topicId : null,
-        enableMakeCard: mode === "learn" ? enableMakeCard : false,
+        enableMakeCard,
       });
       await refresh();
       onCreated(result.conversation.id);
@@ -73,13 +76,17 @@ export function CreatePanel({ intent, onClose, onCreated }: CreatePanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-primary/30 backdrop-blur-[2px] flex items-center justify-center" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="card w-[520px] p-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <h2 className="font-reading text-[22px] text-primary">新建对话</h2>
-          <button type="button" className="icon text-[20px] text-muted hover:text-on-surface" onClick={onClose}>close</button>
-        </div>
-
+    <Modal
+      title="新建对话"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => void submit()}>{busy ? "创建中…" : "创建并进入"}</button>
+        </>
+      }
+    >
+      <div className="space-y-5">
         <div className="flex gap-1 p-1 rounded-lg bg-surface-container">
           {(["learn", "review"] as const).map((item) => (
             <button key={item} type="button" className={`flex-1 py-1.5 rounded-md text-[13px] font-medium ${mode === item ? "bg-surface-container-lowest shadow-sm text-primary" : "text-on-surface-variant"}`} onClick={() => setMode(item)}>
@@ -122,20 +129,13 @@ export function CreatePanel({ intent, onClose, onCreated }: CreatePanelProps) {
           </select>
         </label>
 
-        {mode === "learn" && (
-          <label className="flex items-center gap-2 text-[13px]">
-            <input type="checkbox" className="accent-secondary w-4 h-4" checked={enableMakeCard} onChange={(event) => setEnableMakeCard(event.target.checked)} />
-            允许老师在学习中提议记忆卡片
-          </label>
-        )}
+        <label className="flex items-center gap-2 text-[13px]">
+          <input type="checkbox" className="accent-secondary w-4 h-4" checked={enableMakeCard} onChange={(event) => setEnableMakeCard(event.target.checked)} />
+          {mode === "learn" ? "允许老师在学习中提议记忆卡片" : "允许老师在复习中提议记忆卡片"}
+        </label>
 
         {error && <div className="text-[13px] text-error">{error}</div>}
-
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
-          <button type="button" className="btn-primary" disabled={busy} onClick={() => void submit()}>{busy ? "创建中…" : "创建并进入"}</button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

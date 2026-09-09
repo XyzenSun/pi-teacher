@@ -89,7 +89,7 @@ async function main(): Promise<void> {
         const sessionContext = toolContextFor(db, piRow);
         check(
             "工具上下文由数据库记录构造",
-            sessionContext.spaceType === "learn" && sessionContext.enableMakeCard === true
+            sessionContext.spaceType === "learn" && sessionContext.isMakeCardEnabled() === true
                 && sessionContext.workPath === piRow.work_path,
             sessionContext.spaceType,
         );

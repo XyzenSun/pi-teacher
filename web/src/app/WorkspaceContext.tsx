@@ -25,7 +25,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    try { setData(await workspacesApi.list()); setError(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "加载���败"); }
+    try { setData(await workspacesApi.list()); setError(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "加载失败"); }
   }, []);
   const refreshTopics = useCallback(async () => { try { setTopics((await topicsApi.list()).topics); } catch { /* 在面板内显示错误 */ } }, []);
   const refreshPrompts = useCallback(async () => { try { setPrompts(await promptsApi.list()); } catch { /* 同上 */ } }, []);

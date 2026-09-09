@@ -11,6 +11,7 @@
     "http-smoke": "tsx src/verify/http-smoke.ts",
     "verify:lifecycle": "tsx src/verify/lifecycle.ts",
     "verify:schema": "tsx src/verify/schema-check.ts",
+    "verify:config": "tsx src/verify/config-check.ts",
     "verify:attachments": "tsx src/verify/attachments-check.ts"
   },
   "dependencies": {

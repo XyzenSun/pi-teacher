@@ -69,25 +69,46 @@
  * Tailwind v4 里只有 @utility 声明的类才能被其他规则 @apply，
  * 所以这些复用组件类用 @utility 而不是 @layer components。
  */
-@utility icon { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; }
+/* normal-case 是必需的：Material Symbols 靠连字（ligature）渲染，祖先的 uppercase 会把
+ * "support_agent" 变成 "SUPPORT_AGENT"，连字失配后直接显示成字面文字。 */
+@utility icon { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; }
 @utility btn { @apply inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
 @utility btn-primary { @apply btn bg-primary text-on-primary hover:bg-[#2b343c]; }
 @utility btn-secondary { @apply btn bg-secondary text-on-secondary hover:bg-secondary-soft; }
 @utility btn-ghost { @apply btn text-on-surface-variant hover:bg-surface-container; }
 @utility btn-outline { @apply btn border border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low; }
 @utility btn-danger { @apply btn text-error hover:bg-error-container; }
-@utility input { @apply w-full rounded-md border border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-[13px] focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20; }
+/* 聚焦态：1.5px sage 边框 + 柔和光晕（DESIGN.md），不用浏览器默认蓝色 outline */
+@utility input { @apply w-full rounded-md border-[1.5px] border-outline-variant bg-surface-container-lowest px-3 py-1.5 text-[13px] transition-shadow focus:outline-none focus:border-secondary focus:shadow-[0_0_0_3px_rgba(91,124,110,0.12)]; }
 @utility card { @apply rounded-lg bg-surface-container-lowest border border-line shadow-[0_1px_2px_rgba(30,37,43,0.04)]; }
-@utility label { @apply text-[11px] font-medium tracking-[0.04em] uppercase text-on-surface-variant; }
+/* 不做 uppercase：本产品的领域术语是「Agents Md」「Space」这样的固定写法（CONTEXT.md），
+ * 强制大写会变成 AGENTS MD，与领域语言不一致。字号与字距已足够区分层级。 */
+@utility label { @apply text-[11px] font-medium tracking-[0.04em] text-on-surface-variant; }
 @utility chip { @apply inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium; }
 @utility tab { @apply px-3 py-2 text-[13px] font-medium border-b-2 border-transparent text-on-surface-variant hover:text-on-surface; }
 @utility tab-active { @apply border-secondary text-secondary; }
 
-/* Markdown 正文：阅读字体，行宽由容器限制 */
-.prose-chat { @apply text-[15px] leading-[1.7]; }
+/*
+ * 结构性组件类（DESIGN.md「Lists & Navigation Trees」「Surface Hierarchy」）：
+ * 树节点 32px 行高、选中态左侧竖条；Dock 卡片与输入卡片各自成型。
+ * 同一串 Tailwind 出现在多处时一律提到这里，避免样式漂移。
+ */
+@utility tree-row { @apply h-8 flex items-center gap-1.5 rounded-md text-left text-[13px] text-on-surface hover:bg-surface-container transition-colors; }
+@utility tree-row-active { @apply bg-secondary-container/60 text-on-secondary-container border-l-2 border-secondary; }
+@utility dock-card { @apply flex items-center gap-2 px-2.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-left min-w-0; }
+/* 输入区浮动卡片：focus-within 时抬升阴影，与模板一致 */
+@utility input-floating { @apply rounded-2xl bg-surface-container-lowest border border-line shadow-[0_1px_3px_rgba(30,37,43,0.06)] transition-shadow focus-within:shadow-[0_4px_14px_rgba(30,37,43,0.08)] focus-within:border-outline-variant; }
+/* 输入区内的紧凑控件：pill 形态，禁用态灰化但仍可见其当前值 */
+@utility control-pill { @apply inline-flex items-center gap-1 rounded-md bg-surface-container px-2 py-0.5 text-[11px] text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-surface-container; }
+@utility control-pill-on { @apply control-pill bg-secondary-container/50 text-on-secondary-container hover:bg-secondary-container; }
+
+/* Markdown 正文：阅读字体（Newsreader）+ 1.65 行高，行宽由容器限制（DESIGN.md「Formatting & Readability Rules」） */
+.prose-chat { @apply font-reading text-[15.5px] leading-[1.65]; }
 .prose-chat > * + * { margin-top: 0.75em; }
 .prose-chat h1, .prose-chat h2, .prose-chat h3 { @apply font-reading font-medium text-primary; }
 .prose-chat h1 { font-size: 1.5em; } .prose-chat h2 { font-size: 1.3em; } .prose-chat h3 { font-size: 1.15em; }
+/* 列表、表格与控件仍用 Inter：密集信息用无衬线更好扫读 */
+.prose-chat table, .prose-chat th, .prose-chat td { @apply font-body; }
 .prose-chat p code, .prose-chat li code { @apply font-mono text-[0.85em] bg-surface-container px-1 py-0.5 rounded; }
 .prose-chat pre { @apply font-mono text-[13px] bg-primary text-[#e6e8ea] rounded-lg p-3 overflow-x-auto; }
 .prose-chat pre code { background: transparent; padding: 0; }
@@ -101,4 +122,6 @@
 .prose-chat img { @apply max-w-full rounded-md; }
 .prose-chat .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25em 0; }
 .prose-chat input[type="checkbox"] { @apply mr-1.5 accent-secondary; }
+/* 第三栏宽度只有 22rem，阅读字号会挤压行宽；在窄栏容器内统一降一档 */
+.aside-compact .prose-chat { @apply text-[13px] leading-[1.6]; }
 .mermaid-block svg { max-width: 100%; height: auto; }

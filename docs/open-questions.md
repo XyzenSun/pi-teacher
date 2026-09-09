@@ -1,6 +1,15 @@
 # 未决问题
 
-已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。本文只记录尚未拍板的事项。已确认但尚未实现的架构重构，见 ADR-0030。
+已确认的决策见 [`adr/`](./adr/)，Schema 见 [`../数据库设计.md`](../数据库设计.md)，领域语言见 [`../CONTEXT.md`](../CONTEXT.md)。
+
+## 当前第二阶段 UI / 配置打磨未决
+
+暂无用户层面的未决问题。已确认：
+
+- 系统设置是 `/app` 工作台之上的路由覆盖层 modal；URL、刷新与浏览器前进/后退仍表达完整状态，背景工作区继续可见。
+- 学习日历只展示 `card_schedule` / `review_log` 可确定性复算的 UTC 聚合；不展示连续打卡、平均留存率、预计用时等没有真实数据支撑的指标。
+- 模型与 Provider 配置以结构化表单为主；高级 JSON 只编辑脱敏后的单个 provider 且经过同一白名单。绝不把 `~/.pi/agent/models.json` 原样返回浏览器（ADR-0032）。
+- Teach Style 可在对话进行中切换，Agents Md 仍在创建后固定（ADR-0031）。
 
 ## 当前前端 WebUI 未决
 
@@ -54,7 +63,10 @@
 | 附件 | 属于本次 MVP；上传保存到当前 Pi Session 的 `work_path/attachments/`，后端补上传接口 | 本次对齐 |
 | SPA 工程 | React Router；Vite `/api` proxy；生产 Express serve `web/dist` + SPA fallback | 本次对齐 |
 | 模型 | 增加模型查询/切换 API，模型选择器通过 `set_model` 修改当前 Pi Session | 本次对齐 |
-| 管理入口 | 左下角设置打开一体化设置面板，在同一页面切换 Card、Glossary、Topic、Agents Md、Teach Style 子类；Card 编辑、回收站、Topic FSRS 参数编辑全部进入首版 | 本次对齐 |
+| 管理入口 | 左下角 2×2 Dock：系统设置、学习日历、知识卡库、帮助指南。设置为 `/app` 之上的路由覆盖层 modal，在同一面板切换 Card、Glossary、Topic、Agents Md、Teach Style、账号、模型与 Provider、高级配置八个子页 | 本次对齐 |
+| 会话设定入口 | 模型、制卡开关、教学风格三者直接放在输入区控制条，可见可操作，不折叠进二级菜单；全部真实写后端并回读 | 本次对齐 |
+| 卡片审批交互 | 第三栏上部固定 38% 高度、单卡浏览：左右切换、翻面、`n / 总数` 序号、Topic 切换重置，确认/拒绝后索引自然前进 | 本次对齐 |
+| 页面内交互 | 重命名、删除确认一律用页面内 `InlineEdit` / `ConfirmDialog`，正常路径不使用 `window.prompt` / `alert` / `confirm` | 本次对齐 |
 | 助教 URL | 使用稳定的 `pi_session.id` 作为前端身份，不暴露绝对路径，不使用临时 UUID | 本次对齐 |
 
 ### 卡片与复习

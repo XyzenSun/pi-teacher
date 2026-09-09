@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { topicsApi } from "../api/client.ts";
 import type { Topic } from "../api/types.ts";
-import { ErrorLine, Field, formatDate, Modal, useSubmit } from "./shared.tsx";
+import { formatDate } from "./shared.tsx";
+import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { Modal } from "../ui/Overlays.tsx";
 
 interface TopicFormState { name: string; description: string; requestRetention: string; maximumInterval: string }
 
@@ -15,7 +17,17 @@ function TopicForm({ initial, title, onSubmit, onClose }: { initial: TopicFormSt
   const [state, setState] = useState(initial);
   const { busy, error, run } = useSubmit();
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy || !state.name.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
       <Field label="名称"><input className="input" value={state.name} onChange={(event) => setState({ ...state, name: event.target.value })} /></Field>
       <Field label="简介（可选）"><textarea className="input" rows={3} value={state.description} onChange={(event) => setState({ ...state, description: event.target.value })} /></Field>
       <div className="grid grid-cols-2 gap-3">
@@ -27,9 +39,6 @@ function TopicForm({ initial, title, onSubmit, onClose }: { initial: TopicFormSt
         </Field>
       </div>
       <ErrorLine error={error} />
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
-        <button type="button" className="btn-primary" disabled={busy || !state.name.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
       </div>
     </Modal>
   );

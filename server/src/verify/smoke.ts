@@ -140,7 +140,7 @@ async function main(): Promise<void> {
         const learnCtx: SessionToolContext = toolContextFor(db, learnRow);
         check(
             "toolContextFor 从数据库行构造上下文（spaceType/开关/workPath 都来自记录）",
-            learnCtx.spaceType === "learn" && learnCtx.enableMakeCard === true
+            learnCtx.spaceType === "learn" && learnCtx.isMakeCardEnabled() === true
                 && learnCtx.reviewTopicId === null && learnCtx.workPath === learnRow.work_path,
             learnCtx.spaceType,
         );
@@ -245,7 +245,7 @@ async function main(): Promise<void> {
         });
         const noMakeCtx: SessionToolContext = toolContextFor(db, noMakeRow);
         check("同 Space 第二条对话独占 work_path", noMakeCtx.workPath !== learnCtx.workPath, [learnCtx.workPath, noMakeCtx.workPath]);
-        check("关掉制卡的对话上下文 enableMakeCard=false", noMakeCtx.enableMakeCard === false);
+        check("关掉制卡的对话上下文 isMakeCardEnabled()=false", noMakeCtx.isMakeCardEnabled() === false);
         const noMakeTools = createCardTopicTools(noMakeCtx);
         const offPropose = await callTool(byName(noMakeTools, "card_propose"), { topic_name: "Java", front: "开关关闭的卡", back: "x", reason_and_remark: "x" });
         check("card_propose 被拒（开关）", offPropose.includes("已关闭制卡"), offPropose);
@@ -253,6 +253,19 @@ async function main(): Promise<void> {
         check("topic_create 被拒（开关）", offTopic.includes("已关闭制卡"), offTopic);
         const offQuery = await callTool(byName(noMakeTools, "card_list"), {});
         check("查询类不受开关影响（card_list 可用）", !offQuery.includes("拒绝"));
+
+        // 运行期切换：上下文与工具都是会话启动时构造的，改库后必须立刻改变裁决，
+        // 否则界面上的开关就是假的（这正是第二阶段 PATCH /options 的核心保证）。
+        db.prepare("UPDATE pi_session SET enable_make_card = 1 WHERE id = ?").run(noMakeRow.id);
+        check("运行期开启后同一上下文实时反映（无需重建）", noMakeCtx.isMakeCardEnabled() === true);
+        const reopenedTopic = await callTool(byName(noMakeTools, "topic_create"), { name: "运行期开启的主题" });
+        check("同一工具实例改库后放行 topic_create", reopenedTopic.includes("已创建主题「运行期开启的主题」"), reopenedTopic);
+        db.prepare("UPDATE pi_session SET enable_make_card = 0 WHERE id = ?").run(noMakeRow.id);
+        const reclosedTopic = await callTool(byName(noMakeTools, "topic_create"), { name: "运行期再次关闭的主题" });
+        check("同一工具实例改库后重新拒绝 topic_create", reclosedTopic.includes("已关闭制卡"), reclosedTopic);
+        const reclosedTopicCount = db.prepare("SELECT COUNT(*) AS count FROM topic WHERE name = '运行期再次关闭的主题'")
+            .get() as { count: number };
+        check("运行期被拒的主题没有落库", reclosedTopicCount.count === 0, reclosedTopicCount);
 
         console.log("\n[6] 术语组");
         const proposeTerm = await callTool(byName(glossaryTools, "glossary_propose"), { term: "闭包", definition: "函数与其词法环境的组合" });

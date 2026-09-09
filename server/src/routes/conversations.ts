@@ -10,6 +10,7 @@ import { listConversations, readSessionEntries, buildSessionContext, conversatio
 import { getAttachment, readAttachmentImage } from "../session/attachments.ts";
 import { generateSessionTitle } from "../session/title-generator.ts";
 import { toolContextFor } from "../tools/context.ts";
+import { projectTeachStyle } from "../projection/agents-md.ts";
 import { onAgentRunComplete } from "../events/hub.ts";
 import { clientView } from "../projection/client-view.ts";
 import type { PiSessionRow } from "../db/types.ts";
@@ -136,6 +137,50 @@ export function createConversationsRouter(state: AppState): Router {
       return;
     }
     res.status(201).json({ success: true, conversation: conversationView(row), runtime: runtimeView(row) });
+  });
+
+  router.patch("/:id/options", (req, res) => {
+    const id = readId(req.params.id);
+    const row = getPiSession(state.db, id);
+    if (row.space_type === "ta") throw new HttpError(403, "助教 Pi Session 的制卡权限不可修改");
+    const body = readBody(req.body);
+    const keys = Object.keys(body);
+    if (keys.length !== 1 || keys[0] !== "enableMakeCard" || typeof body.enableMakeCard !== "boolean") {
+      throw new HttpError(400, "options 只接收布尔字段 enableMakeCard");
+    }
+    state.db.prepare("UPDATE pi_session SET enable_make_card = ? WHERE id = ?")
+      .run(body.enableMakeCard ? 1 : 0, id);
+    const updated = getPiSession(state.db, id);
+    res.json({ success: true, conversation: conversationView(updated) });
+  });
+
+  /**
+   * 教学风格可在对话进行中切换（ADR-0031）。风格通过 appendSystemPrompt 进入会话，
+   * 而 appendSystemPrompt 只在会话构造时读取，所以必须落库 + 重投影 style.md +
+   * 按稳定 ID 重开同一 JSONL。历史、模型与 pi_session.id 都不变。
+   */
+  router.patch("/:id/teach-style", async (req, res) => {
+    const id = readId(req.params.id);
+    const row = getPiSession(state.db, id);
+    if (row.space_type === "ta") throw new HttpError(403, "助教 Pi Session 的教学风格不可修改");
+    const body = readBody(req.body);
+    const keys = Object.keys(body);
+    if (keys.length !== 1 || keys[0] !== "teachStyleId") throw new HttpError(400, "teach-style 只接收字段 teachStyleId");
+    const teachStyleId = body.teachStyleId == null ? null : readId(body.teachStyleId, "Teach Style id");
+    if (teachStyleId !== null && !state.db.prepare("SELECT id FROM teach_style WHERE id = ?").get(teachStyleId)) {
+      throw new HttpError(400, "Teach Style 不存在");
+    }
+    const wrapper = getSessionWrapper(sessionKeyFor(id));
+    if (wrapper?.isRunning()) throw new HttpError(409, "请等待当前回复结束再切换教学风格");
+    state.db.prepare("UPDATE pi_session SET teach_style_id = ? WHERE id = ?").run(teachStyleId, id);
+    projectTeachStyle(state.db, row.work_path, teachStyleId);
+    const updated = getPiSession(state.db, id);
+    const wasAlive = wrapper?.isAlive() ?? false;
+    if (wasAlive) {
+      await wrapper?.shutdown();
+      await openConversation(state, updated);
+    }
+    res.json({ success: true, reloaded: wasAlive, conversation: conversationView(updated), runtime: runtimeView(updated) });
   });
 
   router.post("/:id/open", async (req, res) => {

@@ -3,6 +3,8 @@ import type { ModelInfo, SlashCommand } from "../api/types.ts";
 import { captureScrollDistance, getLiveFollowAttached, getNextVisibleCount, getVisibleRenderWindow, restoreScrollTop, VISIBLE_PAGE_SIZE } from "../lib/chat-lazy-load.ts";
 import { ChatInput } from "./ChatInput.tsx";
 import { MessageView } from "./MessageView.tsx";
+import { ModelSelector, SessionControlBar } from "./SessionControls.tsx";
+import { InlineEdit } from "../ui/Overlays.tsx";
 import { indexToolResults, RECYCLED_MESSAGE, type ConnectionStatus } from "./useConversation.ts";
 import type { useConversation } from "./useConversation.ts";
 
@@ -27,7 +29,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ conversationId, title, session, models, onRenamed }: ChatPanelProps) {
-  const { conversation, runtime, status, error, messages, hasMore, loadingOlder, loadOlder, streaming, toolExecutions, sendCommand, reopen, clearError } = session;
+  const { conversation, runtime, status, error, messages, hasMore, loadingOlder, loadOlder, streaming, toolExecutions, sendCommand, reopen, refreshConversation, clearError } = session;
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -85,40 +87,25 @@ export function ChatPanel({ conversationId, title, session, models, onRenamed }:
   const isRunning = Boolean(runtime?.isRunning) || streaming.isStreaming;
   const activeModel = session.model ?? (runtime?.model ? { provider: runtime.model.provider, modelId: runtime.model.id } : null);
 
-  const rename = async () => {
-    const next = prompt("重命名对话", conversation?.name ?? "");
-    if (next === null || !next.trim()) return;
-    await sendCommand({ type: "set_session_name", name: next.trim() });
+  const rename = async (next: string) => {
+    await sendCommand({ type: "set_session_name", name: next });
     onRenamed();
   };
 
   return (
     <section className="flex-1 min-w-0 flex flex-col bg-surface">
-      <header className="h-14 shrink-0 px-5 flex items-center justify-between border-b border-line bg-surface-container-lowest">
+      <header className="h-14 shrink-0 px-5 flex items-center justify-between gap-3 border-b border-line bg-surface-container-lowest">
         <div className="min-w-0 flex items-center gap-2">
-          <h1 className="font-reading text-[18px] text-primary truncate max-w-[420px]">{title}</h1>
-          <button type="button" className="icon text-[16px] text-muted hover:text-on-surface" title="重命名" onClick={() => void rename()}>edit</button>
-          {conversation?.spaceType === "review" && (
-            <span className="chip bg-secondary-container text-on-secondary-container">{conversation.reviewTopicId === null ? "全部 Topic" : `Topic #${conversation.reviewTopicId}`}</span>
-          )}
-          {conversation?.enableMakeCard && <span className="chip bg-tertiary-container text-on-tertiary-container">制卡开启</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`chip ${STATUS_TONE[status]}`}>{STATUS_TEXT[status]}</span>
-          <select
-            className="input w-auto py-1 text-[12px]"
-            value={activeModel ? `${activeModel.provider}/${activeModel.modelId}` : ""}
-            disabled={isRunning || status !== "connected"}
-            title={isRunning ? "运行中不能切换模型" : "切换模型"}
-            onChange={(event) => {
-              const [provider, ...rest] = event.target.value.split("/");
-              void sendCommand({ type: "set_model", provider, modelId: rest.join("/") });
-            }}
+          <InlineEdit
+            value={conversation?.name ?? title}
+            title="重命名对话"
+            inputClassName="w-[360px] text-[15px]"
+            onSubmit={rename}
           >
-            {!activeModel && <option value="">选择模型</option>}
-            {models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.name}</option>)}
-          </select>
+            <h1 className="font-reading text-[18px] text-primary truncate max-w-[420px]">{title}</h1>
+          </InlineEdit>
         </div>
+        <span className={`chip shrink-0 ${STATUS_TONE[status]}`}>{STATUS_TEXT[status]}</span>
       </header>
 
       {error && (
@@ -150,17 +137,25 @@ export function ChatPanel({ conversationId, title, session, models, onRenamed }:
         </div>
       </div>
 
-      <div className="mx-auto w-full">
-        <ChatInput
-          conversationId={conversationId}
-          disabled={status === "recycled" || status === "closed"}
-          isRunning={isRunning}
-          commands={commands}
-          onSend={async (message, attachmentIds) => { followRef.current = true; await sendCommand({ type: "prompt", message, attachmentIds }); }}
-          onSteer={async (message) => { followRef.current = true; await sendCommand({ type: "steer", message }); }}
-          onAbort={() => { void sendCommand({ type: "abort" }); }}
-        />
-      </div>
+      <ChatInput
+        conversationId={conversationId}
+        disabled={status === "recycled" || status === "closed"}
+        isRunning={isRunning}
+        commands={commands}
+        controls={<SessionControlBar conversation={conversation} isRunning={isRunning} onChanged={refreshConversation} />}
+        modelSelector={
+          <ModelSelector
+            models={models}
+            activeModel={activeModel}
+            disabled={isRunning || status !== "connected"}
+            disabledReason={isRunning ? "回复进行中不能切换模型" : "会话未连接，无法切换模型"}
+            onSelect={(provider, modelId) => { void sendCommand({ type: "set_model", provider, modelId }); }}
+          />
+        }
+        onSend={async (message, attachmentIds) => { followRef.current = true; await sendCommand({ type: "prompt", message, attachmentIds }); }}
+        onSteer={async (message) => { followRef.current = true; await sendCommand({ type: "steer", message }); }}
+        onAbort={() => { void sendCommand({ type: "abort" }); }}
+      />
     </section>
   );
 }

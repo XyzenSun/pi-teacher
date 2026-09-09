@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { cardsApi } from "../api/client.ts";
 import type { Card, Topic } from "../api/types.ts";
 import { Markdown } from "../chat/Markdown.tsx";
-import { ErrorLine, Field, formatDate, Modal, StatusChip, StatusFilterBar, useSubmit, type StatusFilter } from "./shared.tsx";
+import { formatDate, StatusChip, StatusFilterBar, type StatusFilter } from "./shared.tsx";
+import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { ConfirmDialog, Modal } from "../ui/Overlays.tsx";
 
 interface CardFormState { topicId: number | null; front: string; back: string; reasonAndRemark: string }
 
@@ -10,20 +12,27 @@ function CardForm({ topics, initial, title, onSubmit, onClose }: { topics: Topic
   const [state, setState] = useState(initial);
   const { busy, error, run } = useSubmit();
   return (
-    <Modal title={title} onClose={onClose}>
-      <Field label="Topic">
-        <select className="input" value={state.topicId ?? ""} onChange={(event) => setState({ ...state, topicId: event.target.value ? Number(event.target.value) : null })}>
-          <option value="">选择 Topic…</option>
-          {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
-        </select>
-      </Field>
-      <Field label="正面（问题）"><textarea className="input font-mono" rows={4} value={state.front} onChange={(event) => setState({ ...state, front: event.target.value })} /></Field>
-      <Field label="背面（答案）"><textarea className="input font-mono" rows={6} value={state.back} onChange={(event) => setState({ ...state, back: event.target.value })} /></Field>
-      <Field label="备注（可选）"><textarea className="input" rows={2} value={state.reasonAndRemark} onChange={(event) => setState({ ...state, reasonAndRemark: event.target.value })} /></Field>
-      <ErrorLine error={error} />
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
-        <button type="button" className="btn-primary" disabled={busy || state.topicId === null || !state.front.trim() || !state.back.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy || state.topicId === null || !state.front.trim() || !state.back.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Topic">
+          <select className="input" value={state.topicId ?? ""} onChange={(event) => setState({ ...state, topicId: event.target.value ? Number(event.target.value) : null })}>
+            <option value="">选择 Topic…</option>
+            {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+          </select>
+        </Field>
+        <Field label="正面（问题）"><textarea className="input font-mono" rows={4} value={state.front} onChange={(event) => setState({ ...state, front: event.target.value })} /></Field>
+        <Field label="背面（答案）"><textarea className="input font-mono" rows={6} value={state.back} onChange={(event) => setState({ ...state, back: event.target.value })} /></Field>
+        <Field label="备注（可选）"><textarea className="input" rows={2} value={state.reasonAndRemark} onChange={(event) => setState({ ...state, reasonAndRemark: event.target.value })} /></Field>
+        <ErrorLine error={error} />
       </div>
     </Modal>
   );
@@ -36,6 +45,7 @@ export function CardsTab({ topics }: { topics: Topic[] }) {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Card | null>(null);
   const [creating, setCreating] = useState(false);
+  const [removing, setRemoving] = useState<Card | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
@@ -89,7 +99,7 @@ export function CardsTab({ topics }: { topics: Topic[] }) {
                     <button type="button" className="btn-danger py-1" onClick={() => void act(() => cardsApi.reject(card.id))}>拒绝</button>
                   </>}
                   {card.status !== "deleted" && <button type="button" className="btn-ghost py-1" onClick={() => setEditing(card)}>编辑</button>}
-                  {card.status === "normal" && <button type="button" className="btn-danger py-1" onClick={() => { if (confirm("移入回收站？复习进度会保留。")) void act(() => cardsApi.remove(card.id)); }}>删除</button>}
+                  {card.status === "normal" && <button type="button" className="btn-danger py-1" onClick={() => setRemoving(card)}>删除</button>}
                   {card.status === "deleted" && <button type="button" className="btn-outline py-1" onClick={() => void act(() => cardsApi.restore(card.id))}>恢复</button>}
                 </div>
               </div>
@@ -105,6 +115,16 @@ export function CardsTab({ topics }: { topics: Topic[] }) {
       {editing && (
         <CardForm topics={topics} title={`编辑卡片 #${editing.id}`} initial={{ topicId: editing.topic_id, front: editing.front, back: editing.back, reasonAndRemark: editing.reason_and_remark ?? "" }} onClose={() => setEditing(null)}
           onSubmit={async (state) => { await cardsApi.update(editing.id, { topicId: state.topicId!, front: state.front, back: state.back, reasonAndRemark: state.reasonAndRemark || null }); await load(); }} />
+      )}
+      {removing && (
+        <ConfirmDialog
+          title="移入回收站"
+          danger
+          message={<>卡片 #{removing.id} 会移入回收站，复习进度保留，可随时恢复。</>}
+          confirmLabel="移入回收站"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => { const target = removing; setRemoving(null); void act(() => cardsApi.remove(target.id)); }}
+        />
       )}
     </div>
   );

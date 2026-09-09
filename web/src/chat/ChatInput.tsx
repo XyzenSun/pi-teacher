@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { conversationsApi } from "../api/client.ts";
 import type { Attachment, SlashCommand } from "../api/types.ts";
 import { buildAtInsertText, buildEntriesFromFiles, extractAtQuery, filterFileEntries, type FileIndexEntry } from "../lib/file-fuzzy.ts";
@@ -13,12 +13,16 @@ interface ChatInputProps {
   disabled: boolean;
   isRunning: boolean;
   commands: SlashCommand[];
+  /** 输入卡片顶部的会话设定条（类型、制卡、教学风格）。 */
+  controls?: ReactNode;
+  /** 输入卡片底部工具行右侧的模型选择器。 */
+  modelSelector?: ReactNode;
   onSend: (message: string, attachmentIds: string[]) => Promise<void>;
   onSteer: (message: string) => Promise<void>;
   onAbort: () => void;
 }
 
-export function ChatInput({ conversationId, disabled, isRunning, commands, onSend, onSteer, onAbort }: ChatInputProps) {
+export function ChatInput({ conversationId, disabled, isRunning, commands, controls, modelSelector, onSend, onSteer, onAbort }: ChatInputProps) {
   const [value, setValue] = useState(() => drafts.get(conversationId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -146,44 +150,45 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, onSen
   };
 
   return (
-    <div className="border-t border-line bg-surface-container-lowest px-4 py-3">
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2">
-          {attachments.map((attachment) => (
-            <div key={attachment.id} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-container-low px-2 py-1 text-[12px]">
-              <span className="icon text-[14px] text-secondary">attach_file</span>
-              <span className="max-w-[160px] truncate">{attachment.name}</span>
-              <span className="text-muted">{Math.ceil(attachment.size / 1024)}KB</span>
-              <button type="button" className="icon text-[14px] text-muted hover:text-error" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}>close</button>
-            </div>
-          ))}
-        </div>
-      )}
-      {menuOpen && (
-        <div className="mb-2 card max-h-56 overflow-auto p-1">
-          {fileSuggestions.map((entry, index) => (
-            <button key={entry.path} type="button" className={`w-full text-left px-2 py-1 rounded text-[13px] font-mono flex items-center gap-2 ${index === menuIndex ? "bg-secondary-container text-on-secondary-container" : "hover:bg-surface-container"}`} onMouseDown={(event) => { event.preventDefault(); applyFileSuggestion(entry); }}>
-              <span className="icon text-[14px]">{entry.isDir ? "folder" : "description"}</span>
-              <span className="truncate">{entry.path}{entry.isDir ? "/" : ""}</span>
-            </button>
-          ))}
-          {commandSuggestions.map((command, index) => (
-            <button key={command.name} type="button" className={`w-full text-left px-2 py-1 rounded text-[13px] flex items-center gap-2 ${index === menuIndex ? "bg-secondary-container text-on-secondary-container" : "hover:bg-surface-container"}`} onMouseDown={(event) => { event.preventDefault(); applyCommand(command); }}>
-              <span className="font-mono">/{command.name}</span>
-              <span className="text-muted truncate">{command.description}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {error && <div className="mb-2 text-[12px] text-error">{error}</div>}
-      <div className="flex items-end gap-2">
-        <button type="button" className="btn-ghost h-9 px-2" title="添加图片附件" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
-          <span className="icon text-[18px]">image</span>
-        </button>
-        <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { void uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+    <div className="px-5 pb-4 pt-2 bg-surface">
+      <div className="mx-auto w-full max-w-reading input-floating p-2.5 space-y-1.5">
+        {controls}
+
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((attachment) => (
+              <div key={attachment.id} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-container-low px-2 py-1 text-[12px]">
+                <span className="icon text-[14px] text-secondary">attach_file</span>
+                <span className="max-w-[160px] truncate">{attachment.name}</span>
+                <span className="text-muted">{Math.ceil(attachment.size / 1024)}KB</span>
+                <button type="button" className="icon text-[14px] text-muted hover:text-error" title="移除附件" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}>close</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {menuOpen && (
+          <div className="card max-h-56 overflow-auto p-1">
+            {fileSuggestions.map((entry, index) => (
+              <button key={entry.path} type="button" className={`w-full text-left px-2 py-1 rounded text-[13px] font-mono flex items-center gap-2 ${index === menuIndex ? "bg-secondary-container text-on-secondary-container" : "hover:bg-surface-container"}`} onMouseDown={(event) => { event.preventDefault(); applyFileSuggestion(entry); }}>
+                <span className="icon text-[14px]">{entry.isDir ? "folder" : "description"}</span>
+                <span className="truncate">{entry.path}{entry.isDir ? "/" : ""}</span>
+              </button>
+            ))}
+            {commandSuggestions.map((command, index) => (
+              <button key={command.name} type="button" className={`w-full text-left px-2 py-1 rounded text-[13px] flex items-center gap-2 ${index === menuIndex ? "bg-secondary-container text-on-secondary-container" : "hover:bg-surface-container"}`} onMouseDown={(event) => { event.preventDefault(); applyCommand(command); }}>
+                <span className="font-mono">/{command.name}</span>
+                <span className="text-muted truncate">{command.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {error && <div className="text-[12px] text-error px-1">{error}</div>}
+
         <textarea
           ref={textareaRef}
-          className="input flex-1 resize-none py-2 min-h-[38px] leading-[1.5]"
+          className="w-full bg-transparent px-1 py-1 resize-none focus:outline-none text-[14px] leading-[1.5] min-h-[38px] placeholder:text-muted"
           rows={1}
           placeholder={disabled ? "会话不可用" : isRunning && !followUpMode ? "输入以插话（Steer）…" : "输入消息，@ 引用文件，/ 使用命令；Enter 发送，Shift+Enter 换行"}
           value={value}
@@ -200,19 +205,35 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, onSen
             if (images.length) { event.preventDefault(); void uploadFiles(images); }
           }}
         />
-        {isRunning
-          ? <button type="button" className="btn-outline h-9" onClick={onAbort} title="中止本轮">停止</button>
-          : null}
-        <button type="button" className="btn-secondary h-9" disabled={disabled || busy || (!value.trim() && attachments.length === 0)} onClick={() => void submit()}>
-          {busy ? "发送中" : isRunning && !followUpMode ? "插话" : "发送"}
-        </button>
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 min-w-0">
+            <button type="button" className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-40" title="添加图片附件" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
+              <span className="icon text-[18px]">image</span>
+            </button>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { void uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+            {isRunning && (
+              <label className="flex items-center gap-1.5 text-[11px] text-on-surface-variant ml-1">
+                <input type="checkbox" className="accent-secondary" checked={followUpMode} onChange={(event) => setFollowUpMode(event.target.checked)} />
+                排队为下一轮追问
+              </label>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {modelSelector}
+            {isRunning && <button type="button" className="btn-outline h-8" onClick={onAbort} title="中止本轮">停止</button>}
+            <button
+              type="button"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-on-primary hover:bg-[#2b343c] transition-colors text-[13px] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={disabled || busy || (!value.trim() && attachments.length === 0)}
+              onClick={() => void submit()}
+            >
+              {busy ? "发送中" : isRunning && !followUpMode ? "插话" : "发送"}
+              <span className="icon text-[16px]">arrow_upward</span>
+            </button>
+          </div>
+        </div>
       </div>
-      {isRunning && (
-        <label className="mt-2 flex items-center gap-1.5 text-[12px] text-on-surface-variant">
-          <input type="checkbox" className="accent-secondary" checked={followUpMode} onChange={(event) => setFollowUpMode(event.target.checked)} />
-          排队为下一轮追问（不打断当前回答）
-        </label>
-      )}
     </div>
   );
 }

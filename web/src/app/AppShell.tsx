@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { ChatPanel } from "../chat/ChatPanel.tsx";
 import { useConversation } from "../chat/useConversation.ts";
 import { Sidebar } from "../sidebar/Sidebar.tsx";
@@ -7,13 +7,16 @@ import { CardProposals } from "../aside/CardProposals.tsx";
 import { AssistantPanel } from "../aside/AssistantPanel.tsx";
 import { CreatePanel, type CreateIntent } from "./CreatePanel.tsx";
 import { WorkspaceProvider, useWorkspace } from "./WorkspaceContext.tsx";
+import { useWorkspaceRoute } from "./overlay-routes.ts";
+import { SettingsOverlay } from "../settings/SettingsOverlay.tsx";
+import { CalendarOverlay } from "./CalendarOverlay.tsx";
+import { HelpOverlay } from "./HelpOverlay.tsx";
 
 function AppLayout() {
-  const params = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  const { conversationId, overlay, valid } = useWorkspaceRoute();
   const { data, models, refresh } = useWorkspace();
   const [intent, setIntent] = useState<CreateIntent | null>(null);
-  const conversationId = params.conversationId && /^\d+$/.test(params.conversationId) ? Number(params.conversationId) : null;
   const session = useConversation(conversationId);
 
   const title = useMemo(() => {
@@ -39,6 +42,9 @@ function AppLayout() {
     }
   }, [session.runtime?.isRunning, session.sessionVersion, refresh, session.runtime]);
 
+  // `/app/xxx` 这类无法解析的路径回到工作台，避免出现空白页面。
+  if (!valid) return <Navigate to="/app" replace />;
+
   return (
     <div className="h-full flex overflow-hidden">
       <Sidebar activeConversationId={conversationId} onOpenConversation={(id) => navigate(`/app/c/${id}`)} onCreate={setIntent} />
@@ -55,12 +61,17 @@ function AppLayout() {
         <ChatPanel conversationId={conversationId} title={title} session={session} models={models} onRenamed={() => void refresh()} />
       )}
 
-      <aside className="w-aside shrink-0 h-full flex flex-col border-l border-line bg-surface-container-low">
+      <aside className="w-aside shrink-0 h-full flex flex-col border-l border-line bg-surface-container-low aside-compact">
+        {/* 模板比例：卡片审批固定 38%，助教占剩余空间（约 2/3） */}
         <CardProposals refreshToken={cardRefreshToken} />
         {data && <AssistantPanel taSessionId={data.taSessionId} mainConversationId={conversationId} />}
       </aside>
 
       {intent && <CreatePanel intent={intent} onClose={() => setIntent(null)} onCreated={(id) => { setIntent(null); navigate(`/app/c/${id}`); }} />}
+
+      {overlay === "settings" && <SettingsOverlay />}
+      {overlay === "calendar" && <CalendarOverlay />}
+      {overlay === "help" && <HelpOverlay />}
     </div>
   );
 }

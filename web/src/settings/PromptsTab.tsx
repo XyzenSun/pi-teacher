@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { promptsApi } from "../api/client.ts";
 import type { AgentsMd, PromptsResponse, SpaceType, TeachStyle } from "../api/types.ts";
-import { ErrorLine, Field, Modal, useSubmit } from "./shared.tsx";
+import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { ConfirmDialog, Modal } from "../ui/Overlays.tsx";
 
 const TYPE_LABEL: Record<SpaceType, string> = { learn: "学习", review: "复习", ta: "助教" };
 const EMPTY: PromptsResponse = { agentsMd: [], teachStyles: [] };
@@ -22,7 +23,18 @@ function PromptForm({ title, initial, lockType, onSubmit, onClose }: { title: st
   const [state, setState] = useState(initial);
   const { busy, error, run } = useSubmit();
   return (
-    <Modal title={title} width={720} onClose={onClose}>
+    <Modal
+      title={title}
+      size="lg"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn-primary" disabled={busy || !state.name.trim() || !state.prompt.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
       {!lockType && (
         <Field label="类型" hint="助教模板全局唯一，由系统维护，不能新建">
           <select className="input" value={state.type} onChange={(event) => setState({ ...state, type: event.target.value as SpaceType })}>
@@ -37,9 +49,6 @@ function PromptForm({ title, initial, lockType, onSubmit, onClose }: { title: st
         <textarea className="input font-mono text-[12px]" rows={18} value={state.prompt} onChange={(event) => setState({ ...state, prompt: event.target.value })} />
       </Field>
       <ErrorLine error={error} />
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>取消</button>
-        <button type="button" className="btn-primary" disabled={busy || !state.name.trim() || !state.prompt.trim()} onClick={() => void run(() => onSubmit(state)).then(onClose).catch(() => {})}>保存</button>
       </div>
     </Modal>
   );
@@ -49,13 +58,13 @@ export function AgentsMdTab() {
   const { data, error, setError, load } = usePrompts();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AgentsMd | null>(null);
+  const [removing, setRemoving] = useState<AgentsMd | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const grouped: Array<[SpaceType, AgentsMd[]]> = (["learn", "review", "ta"] as SpaceType[]).map((type) => [type, data.agentsMd.filter((item) => item.type === type)]);
 
   const remove = async (item: AgentsMd) => {
-    if (!confirm(`删除模板「${item.name}」？`)) return;
-    try { await promptsApi.removeAgentsMd(item.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "删除失败"); }
+    try { await promptsApi.removeAgentsMd(item.id); setRemoving(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "删除失败"); }
   };
 
   return (
@@ -85,7 +94,7 @@ export function AgentsMdTab() {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button type="button" className="btn-ghost py-1" onClick={() => setEditing(item)}>编辑</button>
-                  {item.type !== "ta" && item.usage_count === 0 && <button type="button" className="btn-danger py-1" onClick={() => void remove(item)}>删除</button>}
+                  {item.type !== "ta" && item.usage_count === 0 && <button type="button" className="btn-danger py-1" onClick={() => setRemoving(item)}>删除</button>}
                 </div>
               </div>
             ))}
@@ -105,6 +114,16 @@ export function AgentsMdTab() {
             await load();
           }} />
       )}
+      {removing && (
+        <ConfirmDialog
+          title="删除 Agents Md 模板"
+          danger
+          message={<>删除模板「{removing.name}」？已使用该模板的对话已把内容投影到自己的工作目录，不受影响。</>}
+          confirmLabel="删除"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => void remove(removing)}
+        />
+      )}
     </div>
   );
 }
@@ -113,11 +132,11 @@ export function TeachStyleTab() {
   const { data, error, setError, load } = usePrompts();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<TeachStyle | null>(null);
+  const [removing, setRemoving] = useState<TeachStyle | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const remove = async (item: TeachStyle) => {
-    if (!confirm(`删除教学风格「${item.name}」？`)) return;
-    try { await promptsApi.removeTeachStyle(item.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "删除失败"); }
+    try { await promptsApi.removeTeachStyle(item.id); setRemoving(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "删除失败"); }
   };
 
   return (
@@ -143,7 +162,7 @@ export function TeachStyleTab() {
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <button type="button" className="btn-ghost py-1" onClick={() => setEditing(item)}>编辑</button>
-              {item.usage_count === 0 && <button type="button" className="btn-danger py-1" onClick={() => void remove(item)}>删除</button>}
+              {item.usage_count === 0 && <button type="button" className="btn-danger py-1" onClick={() => setRemoving(item)}>删除</button>}
             </div>
           </div>
         ))}
@@ -160,6 +179,16 @@ export function TeachStyleTab() {
             setNotice(result.notice);
             await load();
           }} />
+      )}
+      {removing && (
+        <ConfirmDialog
+          title="删除教学风格"
+          danger
+          message={<>删除教学风格「{removing.name}」？该风格没有被任何对话使用，删除后不影响已有会话。</>}
+          confirmLabel="删除"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => void remove(removing)}
+        />
       )}
     </div>
   );

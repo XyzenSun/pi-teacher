@@ -136,3 +136,67 @@ export interface SessionState {
   contextUsage: { percent: number; contextWindow: number; tokens: number } | null;
   thinkingLevel: string;
 }
+
+/** 复习排期：全部字段都能由 card_schedule / review_log 复算，无估算指标。 */
+export interface ReviewScheduleResponse {
+  timezone: "UTC";
+  range: { upcomingDays: number; historyDays: number };
+  topicId: number | null;
+  totals: { normalCards: number; proposedCards: number; dueNow: number; overdue: number; withoutSchedule: number };
+  upcoming: Array<{ date: string; dueCount: number }>;
+  history: Array<{ date: string; reviewCount: number; again: number; hard: number; good: number; easy: number }>;
+}
+
+/** provider 凭据只以布尔出现；headerNames 只有名字，值永远不出网。 */
+export interface ProviderConfigView {
+  id: string;
+  name: string | null;
+  api: string | null;
+  apiUnknown: boolean;
+  baseUrl: string | null;
+  apiKeyConfigured: boolean;
+  headerNames: string[];
+  models: Array<{ id: string; name: string | null }>;
+  advancedKeys: string[];
+}
+
+export interface DefaultModelConfig {
+  provider: string | null;
+  modelId: string | null;
+  source: "env" | "settings" | "catalog";
+  editable: boolean;
+}
+
+export interface ModelsConfigResponse {
+  knownApis: string[];
+  secretMask: string;
+  providers: ProviderConfigView[];
+  defaultModel: DefaultModelConfig;
+}
+
+export interface RetrySettingsView {
+  enabled: boolean;
+  maxRetries: number;
+  baseDelayMs: number;
+  provider: { timeoutMs?: number; maxRetries?: number; maxRetryDelayMs: number };
+}
+
+/** settings.json 的受控子集；provider 级 retry 明细无公开 setter，只读展示。 */
+export interface PiSettingsView {
+  defaultProvider: string | null;
+  defaultModel: string | null;
+  retryEnabled: boolean;
+  retry: RetrySettingsView;
+}
+
+export interface PiSettingsResponse { settings: PiSettingsView; defaultModel: DefaultModelConfig }
+
+/** provider 补丁：apiKey / header 值遵循三态（缺省保持、字符串覆盖、null 清除）。 */
+export interface ProviderPatch {
+  name?: string | null;
+  baseUrl?: string | null;
+  api?: string;
+  apiKey?: string | null;
+  headers?: Record<string, string | null>;
+  models?: Array<{ id: string; name?: string | null }>;
+}

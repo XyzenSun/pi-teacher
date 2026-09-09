@@ -255,12 +255,19 @@ export function useConversation(conversationId: number | null) {
     connect(conversationId);
   }, [conversationId, connect]);
 
+  /** 会话设定（制卡开关、教学风格）经 REST 修改后，由调用方触发一次上下文刷新，
+   *  让界面反映后端真实状态而不是乐观假设。 */
+  const refreshConversation = useCallback(async () => {
+    if (conversationId === null) return;
+    await refreshContext(conversationId);
+  }, [conversationId, refreshContext]);
+
   return {
     conversation, runtime, status, error, sessionVersion,
     messages: history.messages, hasMore: history.hasMore, loadingOlder, loadOlder,
     thinkingLevel: history.thinkingLevel, model: history.model,
     streaming, toolExecutions,
-    sendCommand, reopen, clearError: () => setError(null),
+    sendCommand, reopen, refreshConversation, clearError: () => setError(null),
   };
 }
 

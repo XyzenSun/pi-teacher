@@ -212,9 +212,45 @@ async function main(): Promise<void> {
     check("模板编辑成功", (await api("PATCH", `/api/prompts/agents-md/${learnTemplate.id}`, { prompt: `${learnTemplate.prompt}\n新增约定。` })).status === 200);
     check("编辑模板不覆盖已建 Pi 投影", await fs.readFile(path.join(firstRow.work_path, "AGENTS.md"), "utf8") === firstAgents);
 
-    console.log("\n[6] 固定助教与一次性简介（真实 payload）");
-    const navigation = (await api("GET", "/api/workspaces")).json;
-    const taId = navigation.taSessionId as number;
+    console.log("\n[6] 运行期制卡开关与教学风格切换");
+    const secondId = secondRow.id;
+    check("创建时关闭制卡真实落库", second.json.conversation.enableMakeCard === false && getPiSession(db, secondId).enable_make_card === 0);
+    result = await api("PATCH", `/api/conversations/${secondId}/options`, { enableMakeCard: true });
+    check("运行期开启制卡返回新状态", result.status === 200 && result.json.conversation.enableMakeCard === true);
+    check("制卡开关真实落库", getPiSession(db, secondId).enable_make_card === 1);
+    check("制卡开关非布尔被拒", (await api("PATCH", `/api/conversations/${secondId}/options`, { enableMakeCard: "yes" })).status === 400);
+    check("options 拒绝额外字段", (await api("PATCH", `/api/conversations/${secondId}/options`, { enableMakeCard: true, spaceId: 1 })).status === 400);
+    const taSessionId = (await api("GET", "/api/workspaces")).json.taSessionId as number;
+    check("助教会话拒绝改制卡", (await api("PATCH", `/api/conversations/${taSessionId}/options`, { enableMakeCard: true })).status === 403);
+    check("助教制卡仍为关闭", getPiSession(db, taSessionId).enable_make_card === 0);
+
+    // 教学风格切换要经过「落库 → 重投影 style.md → 按稳定 ID 重开」，
+    // 这里断言重开没有换文件、没有丢历史、没有换模型（ADR-0031 的核心风险）。
+    await prompt(secondId, "只回复“记住了”，不调用工具。");
+    const secondPathBefore = getPiSession(db, secondId).path;
+    const secondMessages = (await api("GET", `/api/conversations/${secondId}/context`)).json.messages.length;
+    const secondModelBefore = (await api("GET", `/api/conversations/${secondId}/status`)).json.model;
+    const styleForSwitch = promptLibrary.teachStyles[promptLibrary.teachStyles.length - 1];
+    check("切换到不存在的教学风格被拒", (await api("PATCH", `/api/conversations/${secondId}/teach-style`, { teachStyleId: 999999 })).status === 400);
+    check("teach-style 拒绝额外字段", (await api("PATCH", `/api/conversations/${secondId}/teach-style`, { teachStyleId: styleForSwitch.id, enableMakeCard: true })).status === 400);
+    check("助教会话拒绝改教学风格", (await api("PATCH", `/api/conversations/${taSessionId}/teach-style`, { teachStyleId: styleForSwitch.id })).status === 403);
+    result = await api("PATCH", `/api/conversations/${secondId}/teach-style`, { teachStyleId: styleForSwitch.id });
+    check("运行期切换教学风格成功并重载会话", result.status === 200 && result.json.reloaded === true && result.json.conversation.teachStyleId === styleForSwitch.id);
+    check("style.md 已重投影为新风格", await fs.readFile(path.join(secondRow.work_path, "style.md"), "utf8") === styleForSwitch.prompt);
+    check("重载没有换 JSONL 文件", getPiSession(db, secondId).path === secondPathBefore);
+    check("重载保留历史条数", (await api("GET", `/api/conversations/${secondId}/context`)).json.messages.length === secondMessages);
+    const secondModelAfter = (await api("GET", `/api/conversations/${secondId}/status`)).json.model;
+    check("重载保留已选模型", secondModelAfter.provider === secondModelBefore.provider && secondModelAfter.id === secondModelBefore.id);
+    // 风格是通过 appendSystemPrompt 进入会话的，只有重建后的 agent 系统提示里
+    // 真的出现新风格文本，才说明切换不是「只改了库和文件」。
+    const reloadedSystemPrompt = getSessionWrapper(sessionKeyFor(secondId))!.inner.agent.state?.systemPrompt ?? "";
+    check("新风格真实进入重建后的系统提示", reloadedSystemPrompt.includes(styleForSwitch.prompt.trim()));
+    result = await api("PATCH", `/api/conversations/${secondId}/teach-style`, { teachStyleId: null });
+    check("可清空教学风格", result.status === 200 && result.json.conversation.teachStyleId === null
+      && (await fs.readFile(path.join(secondRow.work_path, "style.md"), "utf8")) === "");
+
+    console.log("\n[7] 固定助教与一次性简介（真实 payload）");
+    const taId = taSessionId;
     await api("POST", `/api/conversations/${id}/command`, { type: "set_session_name", name: "主会话专属简介标记-HTTP" });
     await api("POST", `/api/conversations/${taId}/open`);
     const taAgent = getSessionWrapper(sessionKeyFor(taId))!.inner.agent as unknown as Agent;
@@ -222,19 +258,76 @@ async function main(): Promise<void> {
     const originalOnPayload = taAgent.onPayload;
     taAgent.onPayload = async (payload, model) => { payloads.push(JSON.stringify(payload)); return originalOnPayload?.(payload, model); };
     await prompt(taId, "只回复“准备好了”，不调用工具。");
-    // 断言注入信封本身而不是简介里的字样：真模型可能在回答里复述主会话名，
-    // 那属于模型输出而非我们注入的上下文，只有 <pi-teacher-context> 信封是注入的唯一证据。
-    const injectedTurns = () => payloads.filter((payload) => payload.includes("pi-teacher-context")).length;
-    check("助教默认没有注入主会话上下文", injectedTurns() === 0);
+    // 断言注入信封本身而不是简介里的字样：真模型可能在回答里复述主会话名甚至提到
+    // 标签名，那属于模型输出；只有带尖括号的 <pi-teacher-context> 信封是我们注入的证据。
+    const injectedPayloads = () => payloads.filter((payload) => payload.includes("<pi-teacher-context>"));
+    check("助教默认没有注入主会话上下文", injectedPayloads().length === 0);
     payloads.length = 0;
     await prompt(taId, "若当前输入有授权简介，只回复“已读取”，不复述简介，不调用工具。", { injectMainSessionId: id });
-    check("显式点击的该轮携带主会话简介", injectedTurns() > 0 && payloads.some((payload) => payload.includes("主会话专属简介标记-HTTP")));
+    check("显式点击的该轮携带主会话简介", injectedPayloads().length > 0 && payloads.some((payload) => payload.includes("主会话专属简介标记-HTTP")));
     payloads.length = 0;
     await prompt(taId, "这轮只回复“完成”，不调用工具。");
-    check("下一轮不再注入主会话简介", injectedTurns() === 0);
-    check("助教简介不落历史", !(await fs.readFile(getPiSession(db, taId).path, "utf8")).includes("pi-teacher-context"));
+    const leakedPayloads = injectedPayloads();
+    check(
+      `下一轮不再注入主会话简介${leakedPayloads.length ? `（意外命中片段：${leakedPayloads[0].slice(0, 300)}）` : ""}`,
+      leakedPayloads.length === 0,
+    );
+    // 注入是 context 钩子里临时拼进请求 payload 的，不该写进 JSONL。逐条解析而不是整文件
+    // 搜字符串：失败时要能立刻区分「我们真的持久化了注入」和「真模型在回答里复述了标签名」。
+    // 覆盖两条真实泄漏路径：落成 custom 条目，或把信封拼进非 assistant 消息；assistant
+    // 文本属于模型输出，复述标签名不构成持久化缺陷。
+    const taHistoryLines = (await fs.readFile(getPiSession(db, taId).path, "utf8")).split("\n").filter((line) => line.trim());
+    const persistedContextEntries = taHistoryLines
+      .map((line) => { try { return JSON.parse(line) as Record<string, any>; } catch { return null; } })
+      .filter((entry): entry is Record<string, any> => entry !== null)
+      .filter((entry) => entry.type === "custom" || entry.customType === "pi-teacher-context"
+        || entry.message?.customType === "pi-teacher-context"
+        || (entry.message?.role !== "assistant" && JSON.stringify(entry).includes("<pi-teacher-context>")));
+    check(
+      `助教简介不落历史${persistedContextEntries.length ? `（命中条目：${JSON.stringify(persistedContextEntries[0]).slice(0, 300)}）` : ""}`,
+      persistedContextEntries.length === 0,
+    );
 
-    console.log("\n[7] 回收、稳定身份恢复、SPA 与登出");
+    console.log("\n[8] 账号、模型配置与学习日历 HTTP 契约");
+    result = await api("GET", "/api/review-schedule?upcomingDays=14&historyDays=14");
+    check("学习日历声明 UTC 与真实查询范围", result.status === 200 && result.json.timezone === "UTC"
+      && result.json.range.upcomingDays === 14 && result.json.range.historyDays === 14);
+    check("学习日历只返回可复算聚合", ["normalCards", "proposedCards", "dueNow", "overdue", "withoutSchedule"]
+      .every((key) => Number.isInteger(result.json.totals[key])) && Array.isArray(result.json.upcoming) && Array.isArray(result.json.history));
+    check("学习日历拒绝不存在 Topic", (await api("GET", "/api/review-schedule?topicId=999999")).status === 404);
+    check("学习日历拒绝超大范围", (await api("GET", "/api/review-schedule?upcomingDays=366")).status === 400);
+
+    result = await api("GET", "/api/config/models");
+    check("模型配置公开 Known API 与默认来源", Array.isArray(result.json.knownApis) && result.json.knownApis.includes("anthropic-messages")
+      && result.json.defaultModel.source === "env" && result.json.defaultModel.editable === false);
+    const configText = JSON.stringify(result.json);
+    check("模型配置出口只有凭据布尔与固定掩码", result.json.providers.every((provider: any) => typeof provider.apiKeyConfigured === "boolean"
+      && Array.isArray(provider.headerNames) && !Object.prototype.hasOwnProperty.call(provider, "apiKey") && !Object.prototype.hasOwnProperty.call(provider, "headers")));
+    check("模型配置不泄漏环境引用或命令引用", !configText.includes("$VAR") && !configText.includes("${VAR}") && !configText.includes("!command"));
+    check("环境变量固定时默认模型写入被拒", (await api("PATCH", "/api/config/default-model", {
+      provider: process.env.PI_TEACHER_PROVIDER, modelId: process.env.PI_TEACHER_MODEL,
+    })).status === 409);
+    result = await api("GET", "/api/config/settings");
+    check("运行设置只公开受控字段", result.status === 200
+      && ["defaultProvider", "defaultModel", "retryEnabled", "retry"].every((key) => Object.prototype.hasOwnProperty.call(result.json.settings, key)));
+    const toggledRetry = !result.json.settings.retryEnabled;
+    result = await api("PATCH", "/api/config/settings", { retryEnabled: toggledRetry });
+    check("重试开关可真实写入并读回", result.status === 200 && result.json.settings.retryEnabled === toggledRetry
+      && (await api("GET", "/api/config/settings")).json.settings.retryEnabled === toggledRetry);
+    check("运行设置拒绝白名单外字段", (await api("PATCH", "/api/config/settings", { theme: "dark" })).status === 400);
+
+    check("改用户名要求当前密码", (await api("PATCH", "/api/auth/username", { username: "HTTP新用户名", currentPassword: "wrong" })).status === 401);
+    result = await api("PATCH", "/api/auth/username", { username: "HTTP新用户名", currentPassword: "acceptance-password-123" });
+    check("改用户名同步当前登录态", result.status === 200 && (await api("GET", "/api/auth/me")).json.username === "HTTP新用户名");
+    check("改密码要求当前密码", (await api("PATCH", "/api/auth/password", { currentPassword: "wrong", newPassword: "changed-password-456" })).status === 401);
+    result = await api("PATCH", "/api/auth/password", { currentPassword: "acceptance-password-123", newPassword: "changed-password-456" });
+    cookie = (result.headers.get("set-cookie") ?? "").split(";")[0];
+    check("改密码为当前浏览器换发新 cookie", result.status === 200 && cookie.length > 20
+      && (await api("GET", "/api/auth/me")).json.username === "HTTP新用户名");
+    check("旧密码已失效", (await api("POST", "/api/auth/login", { username: "HTTP新用户名", password: "acceptance-password-123" })).status === 401);
+    check("新密码可以登录", (await api("POST", "/api/auth/login", { username: "HTTP新用户名", password: "changed-password-456" })).status === 200);
+
+    console.log("\n[9] 回收、稳定身份恢复、SPA 与登出");
     const previousPath = getPiSession(db, id).path;
     const messageCount = (await api("GET", `/api/conversations/${id}/context`)).json.messages.length;
     await api("POST", `/api/conversations/${id}/close`);
@@ -250,8 +343,11 @@ async function main(): Promise<void> {
     await waitFor(() => reconnected.some((event) => event.type === "connected"), "恢复后的 SSE", 10_000);
     check("重新连接收到握手", reconnected[0].type === "connected");
     if (existsSync(path.resolve(import.meta.dirname, "../../../web/dist/index.html"))) {
-      const settings = await fetch(`${baseUrl}/settings`);
-      check("SPA fallback 支持直接访问 settings", settings.status === 200 && (await settings.text()).includes('id="root"'));
+      // 设置改为 /app 之上的覆盖层路径后，这些新路径必须能被直接访问和刷新。
+      for (const spaPath of ["/settings", "/app/settings?tab=models", `/app/c/${id}/settings?tab=account`, "/app/calendar", `/app/c/${id}/help`]) {
+        const page = await fetch(`${baseUrl}${spaPath}`);
+        check(`SPA fallback 支持直接访问 ${spaPath}`, page.status === 200 && (await page.text()).includes('id="root"'));
+      }
     } else { skipped += 1; console.log("  - 跳过 SPA 检查：web/dist 尚未构建，前端构建后必须重跑"); }
     check("未知 API 仍返回 JSON 404", (await api("GET", "/api/nonexistent")).status === 404);
     check("登出成功", (await api("POST", "/api/auth/logout")).status === 200);

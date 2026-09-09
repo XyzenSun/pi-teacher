@@ -12,6 +12,7 @@
  *   4. 固定 Space 保护触发器（不可改名、不可删除）
  *   5. 同一 Space 下两条 Pi Session 的 work_path / AGENTS.md / style.md / JSONL 互不干扰
  *   6. 类型与模板匹配、review_topic_id 归属校验（触发器 + 仓储层双保险）
+ *   7. 制卡开关对学习与复习均为双值、助教恒 0；Teach Style 切换后字段与 style.md 同步（ADR-0031）
  *
  * 跑法：npx tsx src/verify/schema-check.ts
  */
@@ -21,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { initializeSchema } from "../db/schema.ts";
 import { createPiSession, getPiSession, sessionKeyFor } from "../session/repository.ts";
+import { projectTeachStyle } from "../projection/agents-md.ts";
 import type { PiSessionRow } from "../db/types.ts";
 
 let passed = 0;
@@ -426,6 +428,37 @@ async function main(): Promise<void> {
     );
     const reviewSessionAgain = createPiSession(db, homeDir, { spaceId: 1, agentsMdId: reviewAgentsId });
     check("固定复习 Space 允许多条复习对话", reviewSessionAgain.id !== reviewSession.id);
+    // 复习会话同样是制卡开关的合法宿主：复习中发现薄弱点要能补卡，
+    // 只有助教才是恒定关闭。此前前端强制传 false，这里锁住双值语义。
+    check("复习对话默认开启制卡", reviewSession.enable_make_card === 1, reviewSession.enable_make_card);
+    const reviewNoCard = createPiSession(db, homeDir, {
+      spaceId: 1, agentsMdId: reviewAgentsId, enableMakeCard: false,
+    });
+    check("复习对话可显式关闭制卡", reviewNoCard.enable_make_card === 0, reviewNoCard.enable_make_card);
+    const taRowForCard = db.prepare("SELECT enable_make_card FROM pi_session WHERE space_id = 0").get() as { enable_make_card: number };
+    check("助教对话制卡恒为 0", taRowForCard.enable_make_card === 0, taRowForCard);
+
+    // Teach Style 运行期切换（ADR-0031）：字段与 style.md 必须同步；
+    // 会话侧的实际生效依赖按稳定 ID 重开，由 http-smoke / lifecycle 覆盖。
+    db.prepare("UPDATE pi_session SET teach_style_id = ? WHERE id = ?").run(socraticStyleId, javaSession.id);
+    projectTeachStyle(db, javaSession.work_path, socraticStyleId);
+    const switchedStyleFile = await fs.readFile(path.join(javaSession.work_path, "style.md"), "utf8");
+    check(
+      "切换 Teach Style 后字段与 style.md 一致",
+      getPiSession(db, javaSession.id).teach_style_id === socraticStyleId && switchedStyleFile.includes("只反问"),
+      { teachStyleId: getPiSession(db, javaSession.id).teach_style_id, switchedStyleFile },
+    );
+    db.prepare("UPDATE pi_session SET teach_style_id = NULL WHERE id = ?").run(javaSession.id);
+    projectTeachStyle(db, javaSession.work_path, null);
+    const clearedStyleFile = await fs.readFile(path.join(javaSession.work_path, "style.md"), "utf8");
+    check(
+      "清空 Teach Style 后 style.md 为空且不继承旧风格",
+      getPiSession(db, javaSession.id).teach_style_id === null && clearedStyleFile.trim() === "",
+      { clearedStyleFile },
+    );
+    // 还原为初始风格，避免影响后续目录一致性断言之外的语义
+    db.prepare("UPDATE pi_session SET teach_style_id = ? WHERE id = ?").run(directStyleId, javaSession.id);
+    projectTeachStyle(db, javaSession.work_path, directStyleId);
     check(
       "getPiSession 带出 space_type（工具上下文靠它裁决权限）",
       getPiSession(db, reviewSession.id).space_type === "review" && getPiSession(db, javaSession.id).space_type === "learn",

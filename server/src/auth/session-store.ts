@@ -45,3 +45,22 @@ export function getLoginSession(token: string | undefined): LoginSession | null 
 export function destroyLoginSession(token: string | undefined): void {
   if (token) loginSessions.delete(token);
 }
+
+/**
+ * 改密后必须让别处的登录失效，否则「改了密码」只是心理安慰。
+ * 保留当前调用者的 token 由路由自己换发新 token，避免把操作者也踢下线。
+ */
+export function destroyOtherLoginSessions(keepToken: string | undefined): number {
+  let removed = 0;
+  for (const token of [...loginSessions.keys()]) {
+    if (token === keepToken) continue;
+    loginSessions.delete(token);
+    removed += 1;
+  }
+  return removed;
+}
+
+/** 单用户模型下改名即改全部登录态里的显示名，避免 /api/auth/me 返回旧名。 */
+export function renameLoginSessions(username: string): void {
+  for (const session of loginSessions.values()) session.username = username;
+}

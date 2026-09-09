@@ -1,10 +1,29 @@
 # TODO
 
-## 当前状态：前端 WebUI 桌面版 MVP 已实现，等待用户验收
+## 当前状态：第二阶段 frontend-polish-config 已立项，待实现
+
+**frontend-polish-config（2026-09-09 立项）**：PRD 见 `tasks/frontend-polish-config.md`。基线 commit `023858e`。在已跑通的 MVP 架构上做三件事：修一个真实规格缺陷（复习 Pi Session 制卡开关被前端写死为 false）、补齐视觉与交互债务（模板结构对齐、页面内交互替代原生弹窗、第三栏 1/3+2/3 与单卡审批、输入区控制条）、新增真实配置能力（账号密码、模型与 provider、受控 JSON、日历聚合）。不重写桥接层与会话架构，不做移动端。
+
+需要新增 ADR：ADR-0031（Teach Style 可运行期切换，修订 `CONTEXT.md` 中「之后不变」）、ADR-0032（WebUI 编辑 Pi 模型配置的 secret 边界）。
+
+## 上一阶段：前端 WebUI 桌面版 MVP 已实现，等待用户验收
 
 **frontend-webui-mvp 已实现**（2026-09-09，未提交、未推送）：PRD 见 `tasks/frontend-webui-mvp.md`。后端按 ADR-0030 破坏性重建（`space → pi_session`，删除 `session` 表与 `session_id`，每条 Pi Session 独占 `work_path`，固定 ta/review Space 与唯一 ta Pi Session）；新增 `web/`（React 19 + TS + Vite 7 + Tailwind v4 + react-router-dom 7，hooks/context，Atelier Mind 令牌）。
 
 验证面（真模型 agnes/agnes-2.5-flash，全部在临时 home，零残留）：`smoke` 84/84、`verify:schema` 66/66、`verify:attachments` 116/116、`verify` 22/22、`http-smoke` 159/159（含 SPA fallback）、`verify:lifecycle` 15/15；`server`/`web` typecheck 零错误；`web` 生产构建成功。另用 agent-browser 真浏览器走通：setup→登录→建学习 Space→创建学习对话→真模型流式回复（KaTeX/Mermaid/工具折叠/提议卡片）→右侧确认卡片→固定助教一次性注入→Topic 快捷入口建复习对话→真实 FSRS 评分→模型切换→回收/重开→图片附件上传并发送→`@` 文件补全与 `/` 命令菜单→/settings 五个 tab 真实 CRUD。
+
+**第二阶段用户验收反馈（2026-09-09，已纳入 `frontend-polish-config` PRD）**：
+
+- [ ] 复习新建面板补「是否允许老师提议制卡」开关（修复：前端当前错误写死 `false`）
+- [ ] 将对话与 Space 重命名从原生 `prompt()` 改为页面内嵌编辑，删除改页面内确认
+- [ ] 左下角补回模板四个快捷卡片：系统设置、学习日历、知识卡库、帮助指南
+- [ ] 保持当前技术栈，但严格按 `前端模板` 对齐布局、间距、色彩与组件风格
+- [ ] 第三栏改为卡片审批 1/3、助教 2/3；审批卡片改左右切换交互
+- [ ] 将模型选择、真实制卡开关、真实教学风格切换移入消息输入区域
+- [ ] 系统设置改为保留当前工作区上下文的小于全屏 route-backed modal
+- [ ] 设置中补齐账号密码修改、模型与 provider 配置、受控 JSON 配置修改（真实读取、校验、原子保存、secret 保护）
+- [ ] 新增真实复习排期聚合 API 与学习日历空状态/排期视图
+- [ ] 新增 ADR-0031 / ADR-0032，并同步 `CONTEXT.md`、`数据库设计.md`、`docs/open-questions.md`
 
 **下一步候选（未排期）**：移动端布局；`compact`/思考等级等会话命令的 UI 入口；卡片合并（`POST /api/cards/merge` 已有接口）；Pi Session 重命名后左树即时刷新的更细粒度事件。
 
