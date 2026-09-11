@@ -264,7 +264,6 @@ export function selectDueCards(
     front: string;
     back: string;
     reason_and_remark: string | null;
-    source_essence_path: string | null;
     topic_name: string;
     last_review: string | null;
     reps: number;
@@ -272,7 +271,7 @@ export function selectDueCards(
 }> {
     const sql = `
         SELECT c.id AS card_id, c.front, c.back, c.reason_and_remark,
-               c.source_essence_path, t.name AS topic_name,
+               t.name AS topic_name,
                cs.last_review, cs.reps, cs.lapses
         FROM card c
         JOIN card_schedule cs ON cs.card_id = c.id

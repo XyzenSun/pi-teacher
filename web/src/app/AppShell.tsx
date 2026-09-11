@@ -47,7 +47,12 @@ function AppLayout() {
 
   return (
     <div className="h-full flex overflow-hidden">
-      <Sidebar activeConversationId={conversationId} onOpenConversation={(id) => navigate(`/app/c/${id}`)} onCreate={setIntent} />
+      <Sidebar
+        activeConversationId={conversationId}
+        onOpenConversation={(id) => navigate(`/app/c/${id}`)}
+        onCreate={setIntent}
+        onConversationDeleted={() => navigate("/app")}
+      />
 
       {conversationId === null ? (
         <section className="flex-1 flex items-center justify-center bg-surface">

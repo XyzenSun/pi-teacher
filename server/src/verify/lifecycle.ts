@@ -1,8 +1,8 @@
 /**
  * 生命周期验证（PRD 验收清单两项）：
- *   1. 空闲回收：PI_TEACHER_IDLE_TIMEOUT_MS 秒级可配置 → 会话 wrapper 被销毁
- *      （jsonl 保留、注册表清空）
- *   2. SIGTERM 优雅退出：先发 session_shutdown 再 dispose，进程 0 退出码
+ *   1. 空闲回收：PI_TEACHER_IDLE_TIMEOUT_MS 秒级可配置 → 学习会话 wrapper 被销毁
+ *      （jsonl 保留、注册表清空）；同进程里以 resident 打开的固定助教不被回收（ADR-0035）
+ *   2. SIGTERM 优雅退出：先发 session_shutdown 再 dispose，进程 0 退出码；助教与学习会话一起关
  *
  * 不依赖 HTTP：子进程用新 Schema 在真实临时数据库里建 Space + Pi Session，
  * 再走 bridge 建真实 SDK 会话（复刻 run-real 的最小路径，全程无 mock）。
@@ -31,10 +31,16 @@ function check(name: string, condition: boolean, detail?: unknown): void {
   }
 }
 
-/** 子进程通过 IPC 报出的路径：会话 JSONL 与该 Pi Session 独占的工作目录。 */
+/** 子进程通过 IPC 报出的路径：会话 JSONL、该 Pi Session 独占的工作目录、固定助教的工作目录。 */
 interface ChildPaths {
   sessionFile: string;
   workPath: string;
+  taWorkPath: string;
+}
+
+/** 同一标记在子进程输出里出现的次数（学习会话与助教各打一次）。 */
+function countMarker(output: string, marker: string): number {
+  return output.split(marker).length - 1;
 }
 
 async function main(): Promise<void> {
@@ -63,14 +69,15 @@ async function main(): Promise<void> {
     child.on("message", (message: string) => {
       if (message.startsWith("SESSION_FILE=")) collected.sessionFile = message.slice("SESSION_FILE=".length);
       if (message.startsWith("WORK_PATH=")) collected.workPath = message.slice("WORK_PATH=".length);
-      if (collected.sessionFile && collected.workPath) {
+      if (message.startsWith("TA_WORK_PATH=")) collected.taWorkPath = message.slice("TA_WORK_PATH=".length);
+      if (collected.sessionFile && collected.workPath && collected.taWorkPath) {
         clearTimeout(timeout);
         resolve(collected as ChildPaths);
       }
     });
     child.on("exit", (code) => reject(new Error(`子进程提前退出 code=${code}\n${childOutput}`)));
   });
-  const { sessionFile, workPath } = childPaths;
+  const { sessionFile, workPath, taWorkPath } = childPaths;
 
   check(
     "会话 JSONL 落在该 Pi Session 独占目录内（ADR-0030 布局）",
@@ -95,7 +102,13 @@ async function main(): Promise<void> {
   const exitCode = await new Promise<number>((resolve) => {
     child.on("exit", (code) => resolve(code ?? -1));
   });
-  check("空闲超时后 wrapper 自动回收（子进程以 0 退出）", exitCode === 0, { exitCode, childOutput });
+  check("空闲超时后学习 wrapper 自动回收、助教显式关闭后子进程以 0 退出", exitCode === 0, { exitCode, childOutput });
+  check("学习会话被回收时常驻助教仍活着（TA_ALIVE_AFTER_RECLAIM=1）", childOutput.includes("TA_ALIVE_AFTER_RECLAIM=1"), childOutput);
+  check(
+    "助教工作目录在 home 的 ta/pi/<pi-session-id> 下",
+    /ta[/\\]pi[/\\]\d+$/.test(path.resolve(taWorkPath)) && path.resolve(taWorkPath).startsWith(path.resolve(homeDir)),
+    taWorkPath,
+  );
   const contentAfterReclaim = await fs.readFile(sessionFile, "utf8").catch(() => "");
   const reclaimedLines = contentAfterReclaim.trim() === "" ? [] : contentAfterReclaim.trim().split("\n");
   check("回收后 jsonl 保留（未随 wrapper 一起删）", reclaimedLines.length > 0, reclaimedLines.length);
@@ -109,8 +122,9 @@ async function main(): Promise<void> {
     [...new Set(reclaimedRoles)],
   );
   check("回收后注册表为空（WRAPPERS_CLEAN=1）", childOutput.includes("WRAPPERS_CLEAN=1"), childOutput);
-  check("回收路径也走了 dispose", childOutput.includes("disposed"), childOutput);
-  check("回收前发出 session_shutdown（扩展有机会收尾）", childOutput.includes("shutdown_emitted"), childOutput);
+  check("回收路径也走了 dispose（学习会话）", childOutput.includes("disposed learn"), childOutput);
+  check("回收前发出 session_shutdown（扩展有机会收尾）", childOutput.includes("shutdown_emitted learn"), childOutput);
+  check("助教只在显式 shutdown 时 dispose 一次（不是被空闲回收）", countMarker(childOutput, "disposed ta") === 1, childOutput);
 
   // —— SIGTERM 优雅退出：起第二个子进程，短暂空闲后发 SIGTERM ——
   console.log("\n[2] SIGTERM 优雅退出");
@@ -136,8 +150,8 @@ async function main(): Promise<void> {
     gracefulChild.on("exit", (code, signal) => resolve(code ?? (signal ? -1 : -1)));
   });
   check("SIGTERM 后进程 0 退出码", gracefulExit === 0, { gracefulExit, gracefulOutput });
-  check("session_shutdown 事件已发出", gracefulOutput.includes("shutdown_emitted"), gracefulOutput);
-  check("shutdown 后 dispose 被调用", gracefulOutput.includes("disposed"), gracefulOutput);
+  check("session_shutdown 事件已发出（学习会话与助教各一次）", countMarker(gracefulOutput, "shutdown_emitted learn") === 1 && countMarker(gracefulOutput, "shutdown_emitted ta") === 1, gracefulOutput);
+  check("shutdown 后 dispose 被调用（学习会话与助教各一次）", countMarker(gracefulOutput, "disposed learn") === 1 && countMarker(gracefulOutput, "disposed ta") === 1, gracefulOutput);
   check(
     "SIGTERM 退出后 jsonl 仍在磁盘上",
     gracefulSessionFile !== "" && await fs.stat(gracefulSessionFile).then(() => true).catch(() => false),

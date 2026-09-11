@@ -1,7 +1,30 @@
 import type {
-  AgentsMd, Attachment, Card, Conversation, DefaultModelConfig, GlossaryTerm, ModelsConfigResponse,
-  ModelsResponse, PiSettingsResponse, PromptsResponse, ProviderConfigView, ProviderPatch,
-  ReviewScheduleResponse, Runtime, SessionContext, Space, TeachStyle, Topic, TriState, WorkspacesResponse,
+  AgentsMd,
+  AppSettingsPatch,
+  Attachment,
+  Card,
+  Conversation,
+  DefaultModelConfig,
+  GlossaryTerm,
+  HomeMarkdownKind,
+  HomeMarkdownResponse,
+  ModelsConfigResponse,
+  ModelsResponse,
+  PiSettingsResponse,
+  PromptsResponse,
+  ProviderConfigView,
+  ProviderPatch,
+  ReviewScheduleResponse,
+  Runtime,
+  SessionContext,
+  Space,
+  TeachStyle,
+  Topic,
+  TriState,
+  UserEnvItem,
+  UserEnvPatch,
+  UserEnvResponse,
+  WorkspacesResponse,
 } from "./types.ts";
 
 /** 后端错误统一带 status 与可选 code；`session_recycled` 由对话页专门处理。 */
@@ -87,6 +110,10 @@ export const conversationsApi = {
   context: (id: number, options: { tail?: number; before?: string } = {}) => request<SessionContext>(`/api/conversations/${id}/context${query(options)}`),
   command: <T = unknown>(id: number, command: SessionCommand) => request<{ success: true; data: T }>(`/api/conversations/${id}/command`, json("POST", command)),
   close: (id: number) => request<{ success: true }>(`/api/conversations/${id}/close`, json("POST")),
+  /** 只对助教有效（ADR-0035）：换新 JSONL 并常驻重开；工作目录与 pi-session-user.md 不动。 */
+  clear: (id: number) => request<{ success: true; conversation: Conversation; runtime: Runtime }>(`/api/conversations/${id}/clear`, json("POST")),
+  /** 真删除（ADR-0037）：行与 JSONL 一起删，工作目录保留；助教 403。 */
+  remove: (id: number) => request<{ success: true; filesRetained: true }>(`/api/conversations/${id}`, { method: "DELETE" }),
   eventsUrl: (id: number) => `/api/conversations/${id}/events`,
   fileIndex: (id: number, q: string) => request<{ files: string[]; truncated: boolean }>(`/api/conversations/${id}/file-index${query({ q })}`),
   upload: async (id: number, file: File) => {
@@ -168,6 +195,12 @@ export const configApi = {
   setDefaultModel: (provider: string, modelId: string) =>
     request<{ success: true; defaultModel: DefaultModelConfig }>("/api/config/default-model", json("PATCH", { provider, modelId })),
   settings: () => request<PiSettingsResponse>("/api/config/settings"),
-  saveSettings: (patch: { defaultProvider?: string | null; defaultModel?: string | null; retryEnabled?: boolean }) =>
-    request<{ success: true; settings: PiSettingsResponse["settings"]; defaultModel: DefaultModelConfig }>("/api/config/settings", json("PATCH", patch)),
+  saveSettings: (patch: { defaultProvider?: string | null; defaultModel?: string | null; retryEnabled?: boolean } & AppSettingsPatch) =>
+    request<{ success: true } & PiSettingsResponse>("/api/config/settings", json("PATCH", patch)),
+  // homeDir 下用户直接编辑的两份 Markdown：全局 USER.md 与全局 AGENTS.md，契约相同。
+  homeMarkdown: (kind: HomeMarkdownKind) => request<HomeMarkdownResponse>(`/api/config/${kind}`),
+  saveHomeMarkdown: (kind: HomeMarkdownKind, content: string) => request<{ success: true }>(`/api/config/${kind}`, json("PUT", { content })),
+  userEnv: () => request<UserEnvResponse>("/api/config/user-env"),
+  saveUserEnv: (patch: UserEnvPatch) => request<{ success: true; items: UserEnvItem[] }>("/api/config/user-env", json("PATCH", patch)),
+  removeUserEnv: (key: string) => request<{ success: true; items: UserEnvItem[] }>(`/api/config/user-env/${encodeURIComponent(key)}`, { method: "DELETE" }),
 };

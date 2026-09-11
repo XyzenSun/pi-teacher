@@ -1,6 +1,7 @@
 # 优先 Docker 部署，代码执行用远程沙箱
 
 > 状态：被 ADR-0027 收口——远程沙箱若接入，只走 skill 或插件，不走 MCP。
+> 状态：基础镜像由 `node:22-slim` 升至 `node:24-slim`（PRD `docs/tasks/preproduction-readiness.md` §3.6：开发与全部验证都在 Node 24 上跑，依赖 `engines` 均 ≥ 22）；slim vs alpine 的结论不变。
 
 系统默认假设运行在容器环境中，并在该约束下设计。同时兼容宿主机直接部署。
 

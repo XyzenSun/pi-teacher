@@ -1,6 +1,6 @@
 # 用户资源目录与挂载约定
 
-> 状态：部分被 ADR-0030 取代——工作目录归属改为 Pi Session 独占；skill 位置、AGENTS.md / USER.md 分层与挂载约定仍有效。
+> 状态：部分被 ADR-0030 取代——工作目录归属改为 Pi Session 独占；「密钥注入：env > .env，启动时单向同步」一节被 ADR-0034 取代——`.env` 文件与 `env-sync.ts` 已删除，变量存 `user_env` 表并注入后端 `process.env`；skill 位置、AGENTS.md / USER.md 分层与挂载约定仍有效。
 
 skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注入的统一约定。本文只定约定与机制事实，Dockerfile / compose 的具体实现留到部署任务再写。
 
@@ -36,7 +36,7 @@ skill 注册位置、AGENTS.md / USER.md 分层、部署挂载方式与密钥注
 
 ### USER.md：无原生机制
 
-Pi 不存在 USER.md / user memory 概念（全源码关键词零命中）。它是纯业务文件，生效完全靠 AGENTS.md 里的引导句（「会话开始时先读全局 USER.md 与当前 Pi Session 的 USER.md，冲突以 Pi Session 级为准」——见 `提示词设计/全局提示词.md`）。放 `~/.pi/agent/` 无任何增益。
+Pi 不存在 USER.md / user memory 概念（全源码关键词零命中）。它是纯业务文件，生效完全靠 AGENTS.md 里的引导句（早期草案「会话开始时先读全局 USER.md 与当前 Pi Session 的 USER.md，冲突以 Pi Session 级为准」已被 ADR-0033 取代：全局 USER.md 由程序读入并经 `appendSystemPrompt` 追加）。放 `~/.pi/agent/` 无任何增益。
 
 ## 部署约定
 
@@ -45,6 +45,8 @@ Pi 不存在 USER.md / user memory 概念（全源码关键词零命中）。它
 skills 目录挂载为宿主目录（`-v /host/skills/tavily-search:/root/.pi/agent/skills/tavily-search` 一类）。不用 named volume / anonymous volume：直接目录挂载语义更直观、宿主侧可直接查看与备份、无 volume 生命周期管理成本。单用户本地部署没有跨机迁移需求。
 
 `~/.pi/agent/`（trust.json、sessions 等运行态）同样目录挂载；`~/pi-teacher/` 整体（数据库、materials、USER.md、AGENTS.md、.env）目录挂载。
+
+落地形态（`compose.yaml`，见 `docs/deploy.md`）：**容器内完全按 Pi 约定**——root 用户，`~/pi-teacher`、`~/.pi/agent`、`~/.pi/agent/skills` 三个位置与宿主机直跑时一字不差，代码里没有容器专用路径。宿主侧只有两个挂载变量：`HOST_PI_TEACHER_HOME`（默认 `./pi-teacher`）与 `HOST_PI_AGENT_DIR`（默认 `./pi-agent`），都可以是任意路径；skills 随 `~/.pi/agent` 整目录一起挂进来，不单独挂、不只读，用户往 `skills/` 里放目录就是自己的 skill。仓库自带的内置 skill（`skills/`）随镜像走：`docker-entrypoint.sh` 每次启动把每个内置 skill **先删同名目录再整目录复制**进 `~/.pi/agent/skills`，内置的归镜像管、用户的其他目录一概不碰；想定制内置 skill 就复制一份改名。
 
 ### 密钥注入：env > .env，启动时单向同步
 

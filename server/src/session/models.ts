@@ -31,8 +31,9 @@ export function refreshModelCatalog(): Promise<void> {
 /** 模型目录与新会话共用默认选择逻辑；只读部署配置，不把配置对象返回 HTTP。 */
 export function selectDefaultModel(runtime: ModelRuntime, cwd: string) {
   const settings = SettingsManager.create(cwd, getAgentDir());
-  const provider = process.env.PI_TEACHER_PROVIDER ?? settings.getDefaultProvider();
-  const modelId = process.env.PI_TEACHER_MODEL ?? settings.getDefaultModel();
+  // 用 || 而不是 ??：compose 里 `PI_TEACHER_PROVIDER=${PI_TEACHER_PROVIDER:-}` 未设置时得到的是空串，空串等同未设置。
+  const provider = process.env.PI_TEACHER_PROVIDER || settings.getDefaultProvider();
+  const modelId = process.env.PI_TEACHER_MODEL || settings.getDefaultModel();
   const available = runtime.getAvailableSnapshot();
   if (provider && modelId) {
     const configured = available.find((model) => model.provider === provider && model.id === modelId);

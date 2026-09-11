@@ -1,12 +1,91 @@
 # TODO
 
-## 当前状态：第三阶段 global-layout-prompt-layering 已立项，待实现
+## 当前阶段：资料归档与学习精华已实现，工程验收完成，待用户 WebUI 验收
 
-**global-layout-prompt-layering（2026-09-09 立项）**：PRD 见 `global-layout-prompt-layering.md`。基线 commit `d10ea07`。补建 `数据库与目录结构设计.md` 定义但从未创建的 `~/pi-teacher/` 全局文件（`AGENTS.md`、`USER.md`、`materials/`、`assets/`、`llm-text-to-img/`）；全局 `USER.md` + 会话 `style.md` 经 `appendSystemPrompt` 固定段落注入，段落里引导模型自行维护会话级 `pi-session-user.md`；设置面板新增「用户偏好」Tab。
+**materials-and-learning-essence（2026-09-11）**：PRD 见 `materials-and-learning-essence.md`，决策见 ADR-0039。全局资料分流规范、学习专属空 `essence/` 与同轮提醒、第四段可编辑文案、卡片来源字段移除及旧库迁移均已落地；代码与根 `CLAUDE.md` 审查通过。`http-smoke` 的自动标题 payload 误判已修正，完整重跑 **522 通过、0 失败、0 跳过**，后端 typecheck 同轮通过。`verify` 本次 27 通过、1 失败（模型把全局偏好写进会话文件），按用户决定不再追测，保留失败记录，不记为通过。浏览器由用户验收；本阶段 Docker 镜像尚未重建，无 commit / push。
+
+以下保留前阶段进度记录；各轮测试数字仅代表当轮结果。
+
+**user-env-in-database（2026-09-10 实现）**：ADR-0034，PRD 见 `user-env-in-database.md`。`user_env` 表取代 `~/pi-teacher/.env` 与 `env-sync.ts`：`server/src/config/user-env.ts` 负责列表 / 补丁 / 删除 / 启动引导（容器 env 与旧 `.env` 只在 key 尚不在表里时首次导入一次），保存后立即写 `process.env`，Pi bash 工具每次 spawn 复制 `process.env`，skill 子进程无需重开会话即拿到新值；值**明文存储、明文回显**（用户审核后去掉了最初实现的隐藏值 / 掩码，旧表的 `secret` 列由幂等迁移删除）；`GET/PATCH /api/config/user-env`、`DELETE /api/config/user-env/:key`；「高级配置」Tab 末尾「用户环境变量」section（`UserEnvSection.tsx`：内置 `TAVILY_*` 三项 + 用户自加项、行内编辑、`ConfirmDialog` 清除 / 删除）；`skills/tavily-search` 文档改为「后端注入、不带 `--env-file`、缺 key 让用户去设置页」。验证面：`verify:config` 103/0（新增第 8 节，含 secret 列迁移）、`http-smoke` 309/0（新增 [8b]，含真模型 `echo $TAVILY_TIMEOUT` 读到刚保存的值）、`smoke` 88/0、`verify` 28/0、`verify:schema` 71/0、`verify:attachments` 116/0、`verify:lifecycle` 15/0；隔离环境真浏览器验收通过。
+
+**global-layout-prompt-layering（2026-09-09 立项，2026-09-10 实现）**：ADR-0033。已完成：`seed.ts` 幂等补建全局布局；`system-prompt-builder.ts` 合并 `USER.md` + `style.md` 并附会话级引导；`GET/PUT /api/config/user-preferences` + 「用户偏好」Tab；`GET/PUT /api/config/global-agents-md` + Agents Md Tab 顶部的全局 AGENTS.md 编辑器；默认模板去重；`verify:config` 四态断言、`http-smoke` API 节、`run-real` 真模型验证会话级偏好行为。原立项说明：PRD 见 `global-layout-prompt-layering.md`。基线 commit `d10ea07`。补建 `数据库与目录结构设计.md` 定义但从未创建的 `~/pi-teacher/` 全局文件（`AGENTS.md`、`USER.md`、`materials/`、`assets/`、`llm-text-to-img/`）；全局 `USER.md` + 会话 `style.md` 经 `appendSystemPrompt` 固定段落注入，段落里引导模型自行维护会话级 `pi-session-user.md`；设置面板新增「用户偏好」Tab。
 
 **仓库整理（2026-09-09，本轮）**：删除冻结脚手架 `tools-dev/server/`、过时 `README.md`、空文件 `docs/助教设计.md`、残稿 `提示词设计/提示词追加位置.md`；`tools-dev/tasks/` → `docs/tasks/`，`tools-dev/doc/spec.md` → `docs/spec.md`；根 `todo.md` 合并入本文件；新增根 `CLAUDE.md`；全部文档（`CONTEXT.md`、`数据库与目录结构设计.md`、`提示词设计/`、`前端模板/`、`THIRD-PARTY-NOTICES.md`）收进 `docs/`，根目录只留 `CLAUDE.md`。
 
 **下一轮待做**：8 组同一决策在多份文档重复书写（Teach Style 可切换、space→pi_session、glossary 不注入、materials 自读自写、镜像无 Python、四档 Rating、复习节奏、角色声明位置），各只保留 ADR 权威版本，其余改为一句引用。
+
+## 上一阶段：预生产准备（2026-09-10 立项，历史说明）
+
+六项均已落地：助教常驻与清除、周期维护提醒、会话真删除、`files/` 及 Docker 部署文件。前阶段镜像与隔离容器已验证；当前资料精华代码尚未重建进镜像，容器与浏览器验收状态不能沿用旧结果。部署的最终形态以 `docs/deploy.md` 为准：Node 24、tsx、容器 root、两个默认相对路径挂载，内置 skill 随镜像覆盖同名目录，出厂提示词集中在 `prompts/defaults.ts`，全局 AGENTS.md 不入库，提醒文案存 `setting`。
+
+**以下六项保留立项快照，不代表当前实现仍缺失。** 原 PRD 见 `preproduction-readiness.md`；ADR-0035–0038 记录定稿，ADR-0039 进一步细化资料与精华职责，早期「待确认」和提示词文档路径不再作为当前实施依据。
+
+### 1. 助教 Pi Session 长期存活，不走空闲回收
+
+- 现状：`AgentSessionWrapper.resetIdleTimer()`（`server/src/bridge/agent-session-wrapper.ts`）对所有会话一视同仁，10 分钟无活动即 `shutdown()`，固定助教（`space_type = "ta"`，唯一一条）也会被回收，用户再打开要等重建。
+- 目标：助教在后端进程生命周期内常驻——启动即打开（或首次访问后不再回收），只有 SIGTERM 优雅退出时才关闭；学习 / 复习会话维持现有回收策略。
+- 实现要点：回收策略按 Pi Session 类型分流，而不是全局关掉计时器；`startWorkspaceSession` 传入「常驻」选项，`resetIdleTimer` 对常驻会话直接返回；`/close` 对助教改为无操作或 400（界面上助教不该有「关闭」）。
+- 验证：`verify:lifecycle` 加一节，把 `PI_TEACHER_IDLE_TIMEOUT_MS` 调到秒级，断言学习会话被回收、助教仍 `isAlive()`；`http-smoke` [7] / [9] 相应调整（[9] 用的是学习会话，应不受影响）。
+- 决策记录：新 ADR（助教常驻的理由：它是跨对话入口，冷启动成本直接落在每次点开；内存代价只有一条会话）。
+
+### 2. 周期性维护提醒：按轮次直接追加在用户消息后
+
+- 现状（已核实）：`context` 钩子每轮只注入状态（活动 / 到期卡数 / 制卡开关）；`appendSystemPrompt` 固定段只在会话开始说一次 `pi-session-user.md` 的读写规则；全局 `USER.md` 谁写、何时写没有任何机制，全靠模型自觉。属于 MVP 实现。
+- 设计（用户定稿，不走 custom 消息、不做异步）：在 `POST /:id/command` 组装 prompt 时判断 `当前轮次 % N === 0`（轮次 = 本会话 user 消息数 + 1，从会话历史现数，不另存计数器），命中就把提醒**直接拼在用户消息末尾**：
+  - `学习 / 复习 && 制卡开`：`<system-reminder>已与用户对话多轮，可以考虑更新用户偏好、用户信息与制卡。如果当前会话下用户针对本次会话提出了要求，而不是全局性要求你以后在其他任务也这么做，更新到 pi-session-user.md。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`
+  - `学习 / 复习 && 制卡关`：同上去掉「与制卡」
+  - `助教`：`<system-reminder>已与用户对话多轮，可以考虑更新用户对你的要求，更新到 pi-session-user.md。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`（助教不维护全局用户偏好 / 用户信息）
+  - 提醒文案放 `docs/提示词设计/` 模板文件由程序读取，便于调词；`N` 做配置项：新建 `setting(key TEXT PRIMARY KEY, value TEXT)` 表（业务运行设置，与 Pi 的 `settings.json` 无关），键 `reminder_interval_turns`，默认 30，`GET/PATCH /api/config/settings` 扩一个字段、「高级配置」Tab 加输入框；`schema-check` 的 `BUSINESS_TABLES` 加 `setting`
+- 实现要点：拼接发生在后端，不改桥接层；提醒直接进用户消息，会落 JSONL、在历史里**保持可见**（用户定稿，不折叠不隐藏）。
+- 验证：`http-smoke` 断言第 N 轮的 provider payload 用户消息末尾含提醒、第 N+1 轮不含（沿用 `payloadHasNonAssistantEnvelope` 思路），三种文案按类型 / 开关各命中一次；真模型不做行为断言（是否维护由模型判断，本就允许不写）。
+- 决策记录：新 ADR「维护提醒按轮次直接追加在用户消息后，判断在程序、内容由模型决定」。
+
+### 3. 助教简化：去掉 style.md，加「清除上下文」
+
+- 观点（用户定稿）：助教的本意是解答疑惑，上下文与记忆不重要；为它做风格投影、记忆维护是反模式。`数据库与目录结构设计.md` 目录树里助教目录已删掉 `style.md`（本地未提交改动）。
+- 现状（已核实）：`projectTeachStyle` 对助教同样写空 `style.md`（真实 `~/pi-teacher/ta/pi/1/` 下存在）；`PATCH /teach-style` 对助教已 403；前端 `SessionControls` 对助教已隐藏风格与制卡控件；`POST /:id/close` 只是回收进程，历史仍在。
+- 要做：
+  - 助教不再投影 `style.md`（创建 / 重载时按 `space_type` 跳过，已有文件启动时删掉或忽略）；`system-prompt-builder` 对助教只带全局 `USER.md`——按第 2 项，助教也不维护它，是否连读都不读待实现时定，先按「读但不提醒维护」
+  - **清除上下文**：`POST /api/conversations/:id/clear`（只允许助教，其余 400）——停掉运行中的 wrapper，删除 `pi_session.path` 指向的 JSONL，重新创建空会话文件（`path` 更新），`work_path` 与其中的 `pi-session-user.md` / 附件保留；不做标记、不做归档。前端助教面板加「清除对话」按钮 + `ConfirmDialog`
+  - 与第 1 项（助教常驻）的关系：清除后立即重建并常驻，用户不感知重启
+- 验证：`http-smoke` [7] 后加：清除前有历史 → 清除后 `context` 为空、旧 JSONL 不存在、`pi-session-user.md` 仍在、对非助教会话 400；`verify:lifecycle` 断言清除不破坏常驻。
+
+### 4. 会话删除（真删除）
+
+- 现状（已核实）：只有 `DELETE /api/workspaces/:id`（整个学习 Space 连同其 Pi Session 行一起删，文件全保留）；单条 Pi Session 没有删除接口；`pi_session` 有 `path`（JSONL）与 `work_path`（工作目录）两列。
+- 设计（用户定稿）：`DELETE /api/conversations/:id` = 删除数据库记录 + 删除 `path` 指向的 JSONL 文件；**不删 `work_path`**（学习产出保留）；不做软删除、不做回收站、不做标记。固定助教不可删（403，用第 3 项的清除）；运行中先 abort + shutdown 再删，与 Space 删除一致。
+- 实现要点：`card` 等表不引用 `pi_session`（卡片归 Topic），删行无级联顾虑；`review_log` 同理；前端左树对话行加「删除」入口 + `ConfirmDialog`（文案写明「聊天记录删除，工作目录文件保留」），删除当前打开的对话时跳回 Space 列表。`DELETE /workspaces/:id`（用户定稿）：删除该 Space 下全部 `pi_session` 行 + 各自 `path` 指向的 JSONL，同样不删 `work_path`。
+- 不做软删除（已核实）：`pi_session.id` 是 `AUTOINCREMENT`，`createPiSession` 取 `MAX(sqlite_sequence.seq, MAX(id)) + 1` 分配 id，删掉 42 后新建得到 43，目录是 `learn/2/pi/43/`，旧 `42/` 的 `AGENTS.md` / `style.md` / `pi-session-user.md` 不会被新会话读到（内存库实测：删 42 后 next_id = 43）；目标目录已存在时 `createPiSession` 还会 409 而不是复用。留下的 `work_path` 是孤儿目录，按「不删 workpath」原样保留。
+- 验证：`http-smoke` 新节：删除后 GET 404、JSONL 不存在、`work_path` 仍在、助教 403、运行中先停再删。
+
+### 5. 会话工作目录新增 `files/`，非图片附件按路径注入提示词
+
+- 现状（已核实）：上传 API 收任意类型，落在 `work_path/attachments/`（`open-questions.md` 当时的对齐结论）；prompt 时 png/jpeg/gif/webp 作为图片块直接喂模型，**所有**附件已在消息末尾追加 `本轮附件：- attachments/<name>` 列表（`routes/conversations.ts:227`）；前端选择框 `accept="image/*"`，按钮文案「添加图片附件」，粘贴只收图片。设计阶段的目录树（`学习区设计.md` 早期版本）只有 essence / assets / learning-records，**没有** files 目录——用户记忆中的「会话级 files」应在本阶段正式定义。
+- 目标：目录层面把「用户上传给本会话的文件」定名为 `<work_path>/files/`（`CONTEXT.md` 增术语，与全局 `materials/` 区分：files 是本会话的输入，materials 是全局资料库）；非图片附件上传后，本轮提示词明确注入「用户上传了 `<文件名>`，路径 `files/<文件名>`」，让模型知道有文件、去哪读；图片仍直接作为图片块发送。文件内容的理解（PDF / 视频 / office）交给后续 skill（document 转 markdown、视频理解），后端不做转换。
+- 实现要点：`attachments/` → `files/` 改名（`ATTACHMENTS_DIR_NAME`、`createPiSession` 建目录、file-index 跳过规则、`docs/数据库与目录结构设计.md` 目录树）；已有部署的旧目录做一次性重命名或兼容读取——先与用户确认取舍；注入文案区分图片与非图片（图片已随消息发送，不必再列路径；非图片列文件名 + 相对路径 + 大小）；前端放开 `accept`、改文案、粘贴放开为任意文件；`verify:attachments` 与 `http-smoke` [3]/[4] 同步。
+- 决策记录：ADR（目录命名 + 注入形态 + 「后端不做内容转换，交给 skill」）。
+
+### 6. Docker 实现，转预生产
+
+- 现状：仓库里还没有 Dockerfile / compose；后端 `index.ts` 已能托管 `web/dist`（SPA fallback，`http-smoke` [9] 有断言）；`skills/tavily-search/scripts/tavily-search` 是静态链接的 Go 二进制，直接挂载即可；开发机 Node 24.19，ADR-0015 写的基础镜像是 `node:22-slim`——需先核对 `better-sqlite3` / `tsx` 对 Node 22 与 24 的兼容，决定镜像 Node 版本并回写 ADR-0015。
+- 约束（ADR-0015 / ADR-0029 / ADR-0034，直接引用）：单一语言运行时 Node，不装 Python；`node:*-slim` 非 alpine；目录挂载不用 named volume：`~/pi-teacher/`（数据库、materials、AGENTS.md、USER.md、会话工作目录）、`~/.pi/agent/`（models.json、settings.json、skills）；用户环境变量已入库，容器 env 只做首次导入，compose 里只需 `PI_TEACHER_HOME`、`PORT`、可选 `PI_TEACHER_PROVIDER` / `PI_TEACHER_MODEL`。
+- 交付：多阶段 `Dockerfile`（web 构建 → server 依赖 → 运行镜像，`tsx` 直跑或预编译二选一，需确认）、`compose.yaml`（端口、两个挂载目录、restart 策略、healthcheck 打 `/api/auth/status`）、`.dockerignore`；镜像内以非 root 用户运行时 `~/pi-teacher` 与 `~/.pi` 的 HOME 解析要与 `getAgentDir()` 一致，先核实 Pi 如何定位 agent 目录。
+- 验证：真容器起来后跑 `http-smoke` 的 HTTP 面（进程内脚本不适用，需要一个「对已运行实例」的验收入口，可能新增 `verify:remote`）；`skills` 挂载后模型能真实调到 tavily-search；重启容器后会话、卡片、用户环境变量全部保留。
+- 文档：部署文档放 `docs/deploy.md`（不写 README，开发完成后再写）；`CLAUDE.md` 常用命令加容器起停；ADR-0015 若改 Node 版本补状态行。
+
+## 本阶段：资料归档与学习精华（2026-09-11 用户定稿并实施）
+
+完整需求、实现位置与用户 WebUI 清单见 `materials-and-learning-essence.md`；决策见 ADR-0039。
+
+- [x] **全局提示词明确 `materials` 操作规范**：上传仍落会话 `files/`，模型阅读后判断正确性与可学习性；规整资料直接移入全局 `materials/`，混乱原件先保留到 `materials/origins/`，整理版本放入资料库并由模型维护索引。规范集中在 `GLOBAL_AGENTS_MD`，没有后端自动归档、转换或质量判断。
+- [x] **仅学习默认提供空 `essence/`**：新建与旧学习会话正常打开共用幂等 helper；不全盘扫描，缺历史先拒绝打开，普通文件占用返回 409。助教 / 复习不自动创建，任何已有精华文件保留。
+- [x] **仅学习同轮追加精华提醒**：复用 `reminder_interval_turns` 与原轮次，学习制卡开 / 关都追加，助教 / 复习原提醒不变。新增 `learningEssence` 设置项，原三段出厂与自定义文案保留；是否实际维护由模型判断。
+- [x] **卡片与精华路径解耦**：移除 `source_essence_path` 与 HTTP / 前端的 `has_source_essence`；真实旧库重复迁移验证保留卡片、调度、复习日志、ID / 自增序列、约束 / 索引与精华文件，无替代绑定。
+- [x] **文档与工程验收收尾**：ADR-0039、旧 ADR 状态、领域语言、数据库目录、工具定义、部署与 CLAUDE.md 已同步；schema 100/0、config 108/0、attachments 126/0、smoke 91/0、lifecycle 18/0、前端 build 通过。HTTP 的自动标题请求误判已修正，完整重跑 522/0、0 跳过，后端 typecheck 通过；中文替换字符与本阶段 diff 空白检查通过，隔离配置副本已清理。
+
+`verify` 本轮 27 通过、1 失败：模型把全局偏好误写进 `pi-session-user.md`。按用户决定不再追测，保留原断言与失败记录，不记为通过；浏览器由用户验收。
+
+升级注意：已有 `~/pi-teacher/AGENTS.md` 不自动覆盖，需手工合并新资料规范；原三段自定义提醒不重置，新精华文案缺行即有默认值。容器需重建镜像，本阶段尚未构建。详见 `docs/deploy.md`。
 
 ## 待设计 / 待实现（从根 todo.md 合并，仍有效）
 
@@ -65,7 +144,7 @@ PRD 见 `frontend-webui-mvp.md`。后端按 ADR-0030 破坏性重建（`space �
 - [x] 工程骨架：server/ 包 scaffolding + 版本定稿（express 5、pi-agent-core 提升直接依赖 0.84.2）
 - [x] 桥接层：rpc-manager 2067 行裁剪重写（约 600 行）+ 4 文件直拷 + normalize.ts
 - [x] 会话管理：directory-scan / session-reader / title-generator 移植
-- [x] 投影/注入：agents_md / teach_style / context 哨兵 / env-sync 启动钩子
+- [x] 投影/注入：agents_md / teach_style / context 哨兵 / env-sync 启动钩子（env-sync 已于 2026-09-10 被 `user_env` 表取代，ADR-0034）
 - [x] 认证：user 表 scrypt + setup/login/logout + 签名 cookie
 - [x] CRUD 路由：workspaces / conversations(+SSE) / cards / glossary / topics / prompts
 - [x] http-smoke 全链路 51/51（真模型）

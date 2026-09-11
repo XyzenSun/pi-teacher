@@ -1,0 +1,34 @@
+# Pi Teacher 单机部署（docs/deploy.md）。数据全在挂载目录里，镜像可随时重建。
+#
+# 容器内完全按 Pi 约定：业务数据 ~/pi-teacher、Pi 配置 ~/.pi/agent、skills ~/.pi/agent/skills（root 用户，即 /root/…）。
+# 宿主侧放哪里由下面两个变量决定，默认就是 compose.yaml 旁边的 ./pi-teacher 与 ./pi-agent（首次启动自动创建）；
+# 变量可写在 compose.yaml 旁的 .env（已被 .gitignore 与 .dockerignore 排除）或 shell 环境里。
+services:
+  pi-teacher:
+    build: .
+    image: pi-teacher:local
+    # PID 1 用 tini 转发信号：SIGTERM 才能进 registerSignalHandlers，让会话先 session_shutdown 再退出。
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${PI_TEACHER_PORT:-39871}:39871"
+    volumes:
+      # 业务数据：SQLite、materials、各会话工作目录、全局 AGENTS.md / USER.md。
+      - ${HOST_PI_TEACHER_HOME:-./pi-teacher}:/root/pi-teacher
+      # Pi 配置：models.json（provider 与 API key）、settings.json（默认模型），以及 skills/ 子目录（ADR-0029）。
+      # 内置 skill 由镜像的 docker-entrypoint.sh 每次启动覆盖进 skills/，用户自己的 skill 直接往 skills/ 里放目录即可。
+      - ${HOST_PI_AGENT_DIR:-./pi-agent}:/root/.pi/agent
+    environment:
+      # 设定后默认模型在界面不可改（CLAUDE.md 技术事实）；留空则用 models.json / settings.json 的默认值。
+      - PI_TEACHER_PROVIDER=${PI_TEACHER_PROVIDER:-}
+      - PI_TEACHER_MODEL=${PI_TEACHER_MODEL:-}
+      # 用非 localhost / 非 IP 的域名访问时要把域名写进来，否则 Host 校验返回 403（security/request-security.ts）。
+      - PI_TEACHER_HOSTNAME=${PI_TEACHER_HOSTNAME:-}
+      # 用户环境变量（TAVILY_* 等）存 user_env 表并在界面维护（ADR-0034）；容器 env 只在 key 尚不在表里时首次导入一次。
+    healthcheck:
+      # slim 镜像没有 curl / wget，用 node 自带的 fetch。
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:39871/api/auth/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

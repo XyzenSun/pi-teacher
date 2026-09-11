@@ -6,7 +6,8 @@ import { buildAtInsertText, buildEntriesFromFiles, extractAtQuery, filterFileEnt
 /** 草稿按对话 ID 存内存：切换会话再切回来不丢输入，刷新页面则按后端历史重建。 */
 const drafts = new Map<number, string>();
 
-const MAX_IMAGES = 5;
+/** 单次发送的附件数量上限，与后端 attachmentIds 的上限一致（ADR-0038：任意类型）。 */
+const MAX_ATTACHMENTS = 8;
 
 interface ChatInputProps {
   conversationId: number;
@@ -95,7 +96,7 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, contr
 
   const uploadFiles = useCallback(async (files: File[]) => {
     setError(null);
-    for (const file of files.slice(0, MAX_IMAGES - attachments.length)) {
+    for (const file of files.slice(0, MAX_ATTACHMENTS - attachments.length)) {
       try {
         const result = await conversationsApi.upload(conversationId, file);
         setAttachments((current) => [...current, result.attachment]);
@@ -201,17 +202,18 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, contr
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => { composingRef.current = false; compositionEndAtRef.current = Date.now(); }}
           onPaste={(event) => {
-            const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-            if (images.length) { event.preventDefault(); void uploadFiles(images); }
+            // 粘贴的文件（截图、从文件管理器复制的文档）一律作为附件上传，不限类型（ADR-0038）。
+            const files = Array.from(event.clipboardData.files);
+            if (files.length) { event.preventDefault(); void uploadFiles(files); }
           }}
         />
 
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0">
-            <button type="button" className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-40" title="添加图片附件" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
-              <span className="icon text-[18px]">image</span>
+            <button type="button" className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors disabled:opacity-40" title="添加附件（图片直接进入对话，其他文件会告诉老师路径）" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
+              <span className="icon text-[18px]">attach_file</span>
             </button>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { void uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+            <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
             {isRunning && (
               <label className="flex items-center gap-1.5 text-[11px] text-on-surface-variant ml-1">
                 <input type="checkbox" className="accent-secondary" checked={followUpMode} onChange={(event) => setFollowUpMode(event.target.checked)} />

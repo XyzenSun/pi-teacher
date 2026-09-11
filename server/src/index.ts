@@ -4,16 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { parseEnv } from "node:util";
 import { openDatabase, closeDatabase } from "./db/connection.ts";
 import { initializeSchema } from "./db/schema.ts";
-import { syncEnvToFile, getSyncKeys } from "./env-sync.ts";
+import { bootstrapUserEnv } from "./config/user-env.ts";
 import { apiRequestSecurity } from "./security/request-security.ts";
 import { initCookieSigning, requireAuth } from "./auth/middleware.ts";
 import { createAuthRouter } from "./routes/auth.ts";
 import { createWorkspacesRouter } from "./routes/workspaces.ts";
 import { createConversationsRouter } from "./routes/conversations.ts";
 import { createAttachmentsRouter } from "./routes/attachments.ts";
+import { renameLegacyAttachmentDirs } from "./session/attachments.ts";
+import { registerSignalHandlers } from "./bridge/agent-session-wrapper.ts";
 import { createModelsRouter } from "./routes/models.ts";
 import { createCardsRouter } from "./routes/cards.ts";
 import { createGlossaryRouter } from "./routes/glossary.ts";
@@ -28,7 +29,6 @@ export interface ServerOptions {
   homeDir?: string;
   dbPath?: string;
   port?: number;
-  envFilePath?: string;
   webDistDir?: string;
 }
 
@@ -44,6 +44,13 @@ export async function buildApp(options: ServerOptions = {}) {
   const db = openDatabase(options.dbPath ?? path.join(dataDir, "pi-teacher.db"));
   try {
     initializeSchema(db, homeDir);
+    // 旧部署的 attachments/ 一次性改名为 files/（ADR-0038），必须早于任何上传与会话打开。
+    const migratedDirs = renameLegacyAttachmentDirs(db);
+    if (migratedDirs.renamed) console.log(`[attachments] 已把 ${migratedDirs.renamed} 个会话的 attachments/ 改名为 files/`);
+    // 用户环境变量进 process.env 要早于任何会话创建：skill 子进程靠继承拿值（ADR-0034）。
+    const imported = bootstrapUserEnv(db, homeDir);
+    if (imported.fromEnv.length) console.log(`[user-env] 已从环境变量首次导入：${imported.fromEnv.join("、")}`);
+    if (imported.fromDotenv.length) console.log(`[user-env] 已从 .env 首次导入：${imported.fromDotenv.join("、")}（该文件不再被读取，可删除）`);
     const keyPath = path.join(dataDir, "cookie.key");
     let keyMaterial: string;
     try {
@@ -88,19 +95,10 @@ export async function buildApp(options: ServerOptions = {}) {
   }
 }
 
-/** Tavily 仅装入已约定白名单，配置值绝不输出到日志。 */
 export async function startServer(options: ServerOptions = {}) {
-  const homeDir = applicationHome(options);
-  await fs.mkdir(homeDir, { recursive: true });
-  const envFilePath = options.envFilePath ?? path.join(homeDir, ".env");
-  try {
-    const localEnv = parseEnv(await fs.readFile(envFilePath, "utf8"));
-    for (const key of getSyncKeys()) if (!process.env[key] && localEnv[key]) process.env[key] = localEnv[key];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  await syncEnvToFile(envFilePath, process.env);
   const { app } = await buildApp(options);
+  // 只在真正常驻的进程里挂信号钩子：验证脚本走 buildApp 自己收尾，不需要 process.exit。
+  registerSignalHandlers();
   const port = options.port ?? Number(process.env.PORT ?? 39871);
   return new Promise<{ close: () => void; port: number }>((resolve, reject) => {
     const server = app.listen(port, () => {

@@ -6,6 +6,27 @@ import type { PiSessionRow, SpaceRow, SpaceType } from "../db/types.ts";
 import { projectAgentsMd, projectTeachStyle } from "../projection/agents-md.ts";
 import { HttpError } from "../routes/http.ts";
 
+/**
+ * 会话文件目录名（相对 work_path，ADR-0038）：用户上传给本会话的原始文件。目录布局归本模块
+ * （createPiSession 建目录），attachments.ts 只消费；HTTP 路由名保留 attachments。
+ */
+export const SESSION_FILES_DIR_NAME = "files";
+export const SESSION_ESSENCE_DIR_NAME = "essence";
+
+/** 新建与重开学习会话共用：只保证空目录存在，精华内容始终交给模型维护（ADR-0039）。 */
+export function ensureLearningEssenceDirectory(workPath: string, spaceType: SpaceType): void {
+  if (spaceType !== "learn") return;
+  try {
+    mkdirSync(path.join(workPath, SESSION_ESSENCE_DIR_NAME), { recursive: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST" || code === "ENOTDIR") {
+      throw new HttpError(409, "Pi Session 的 essence 路径被非目录占用，请检查工作目录");
+    }
+    throw error;
+  }
+}
+
 export function sessionKeyFor(id: number): string {
   return `pi-teacher-pi-session-id-${id}`;
 }
@@ -82,10 +103,7 @@ export function createPiSession(
       if (existsSync(workPath)) throw new HttpError(409, "Pi Session 目标目录已存在，请先检查数据目录");
       mkdirSync(workPath);
       createdDirectory = workPath;
-      const manager = SessionManager.create(workPath, workPath, { id: sessionKeyFor(id) });
-      const sessionFile = manager.getSessionFile();
-      const header = manager.getHeader();
-      if (!sessionFile || !header) throw new Error("Pi 未生成持久化会话路径");
+      const sessionFile = createEmptySessionFile(workPath, id);
       db.prepare(`INSERT INTO pi_session
         (id, space_id, name, work_path, path, agents_md_id, teach_style_id, enable_make_card, review_topic_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
@@ -94,15 +112,43 @@ export function createPiSession(
         space.type === "ta" ? 0 : input.enableMakeCard === false ? 0 : 1, input.reviewTopicId ?? null,
       );
       projectAgentsMd(db, workPath, input.agentsMdId);
-      projectTeachStyle(db, workPath, input.teachStyleId ?? null);
-      mkdirSync(path.join(workPath, "attachments"));
-      // SDK 默认首条 assistant 才刷盘。先持久化 SDK 自己生成的 header，随后统一
-      // SessionManager.open，使空对话重启仍有稳定身份，同时不伪造任何历史消息。
-      writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
+      // 助教没有教学风格（ADR-0035）：不投影 style.md，system prompt 里也就没有风格块。
+      if (space.type !== "ta") projectTeachStyle(db, workPath, input.teachStyleId ?? null);
+      mkdirSync(path.join(workPath, SESSION_FILES_DIR_NAME));
+      ensureLearningEssenceDirectory(workPath, space.type);
       return getPiSession(db, id);
     }).immediate();
   } catch (error) {
     if (createdDirectory) rmSync(createdDirectory, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * 真删除（ADR-0037）：先删行，再删 JSONL。行删掉后 JSONL 已不可达，删文件失败只记日志，
+ * 不回滚——孤儿历史文件与刻意保留的工作目录（AGENTS.md、上传文件、pi-session-user.md）同类。
+ * 调用方负责先 abort / shutdown 运行中的 wrapper；固定助教由路由层挡在门外（403）。
+ */
+export function deletePiSession(db: Database.Database, row: PiSessionRow): void {
+  db.prepare("DELETE FROM pi_session WHERE id = ?").run(row.id);
+  try {
+    rmSync(row.path, { force: true });
+  } catch (error) {
+    console.error(`[repository] Pi Session ${row.id} 的历史文件删除失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * 在 workPath 下生成一个只含 header 的空 JSONL，返回其路径。SDK 默认首条 assistant 才刷盘，
+ * 这里先持久化 SDK 自己生成的 header，随后统一 SessionManager.open，使空对话重启仍有
+ * 稳定身份（同一 sessionKey），同时不伪造任何历史消息。文件名由 SDK 带时间戳生成，
+ * 助教清除对话时再调一次即可得到与旧文件不冲突的新文件（ADR-0035）。
+ */
+export function createEmptySessionFile(workPath: string, id: number): string {
+  const manager = SessionManager.create(workPath, workPath, { id: sessionKeyFor(id) });
+  const sessionFile = manager.getSessionFile();
+  const header = manager.getHeader();
+  if (!sessionFile || !header) throw new Error("Pi 未生成持久化会话路径");
+  writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
+  return sessionFile;
 }

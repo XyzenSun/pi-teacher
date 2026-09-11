@@ -7,9 +7,10 @@
 //   保留——wrapper 生命周期、prompt 准入队列与两段式 ack、空闲回收、
 //        启动锁、send() 命令表、emit/onEvent、destroy/shutdown、优雅退出
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { withPromptContext } from "../projection/context-inject.ts";
+import { buildAppendedSystemPrompt } from "../projection/system-prompt-builder.ts";
 import { selectDefaultModel } from "../session/models.ts";
 import type { AgentSessionLike, ToolInfo } from "./pi-types.ts";
 import type { SessionToolContext } from "../tools/context.ts";
@@ -27,6 +28,8 @@ type AgentRunCompleteListener = (sessionId: string) => void;
 export interface AgentSessionWrapperOptions {
   /** 标题生成等「首轮完成后」的钩子（pi-web 用于 web-push，这里给事件 hub） */
   onAgentRunComplete?: AgentRunCompleteListener;
+  /** 常驻：不设空闲计时器，只随进程 SIGTERM / SIGINT 或显式 shutdown 关闭（固定助教，ADR-0035）。 */
+  resident?: boolean;
 }
 
 const IDLE_RESET_EVENT_TYPES = new Set([
@@ -54,6 +57,7 @@ export class AgentSessionWrapper {
   private agentRunNeedsCompletion = false;
   private promptAdmissionTail: Promise<void> = Promise.resolve();
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
+  private readonly resident: boolean;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   // 多个销毁监听器：注册表清理、外部打点可以并存（单槽会被互相覆盖）
@@ -68,6 +72,7 @@ export class AgentSessionWrapper {
     options: AgentSessionWrapperOptions = {},
   ) {
     this.onAgentRunComplete = options.onAgentRunComplete;
+    this.resident = options.resident ?? false;
   }
 
   get sessionId(): string {
@@ -92,6 +97,11 @@ export class AgentSessionWrapper {
 
   isAlive(): boolean {
     return this._alive;
+  }
+
+  /** 常驻会话不参与空闲回收；供路由与验证脚本区分「回收了」与「本来就不回收」。 */
+  isResident(): boolean {
+    return this.resident;
   }
 
   isRunning(): boolean {
@@ -130,7 +140,9 @@ export class AgentSessionWrapper {
   }
 
   private emit(event: AgentEvent): void {
-    for (const listener of this.listeners) {
+    // 遍历快照：SSE 监听者收到 session_recycled 会同步 unsubscribe（splice 自己），
+    // 直接遍历原数组会跳过下一个监听者——同一会话开两条 SSE 时第二条永远收不到回收事件。
+    for (const listener of [...this.listeners]) {
       try {
         listener(event);
       } catch (error) {
@@ -155,7 +167,8 @@ export class AgentSessionWrapper {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (!this._alive) return;
+    // 常驻会话（固定助教）只随进程退出或显式 shutdown 关闭，从不设空闲计时器（ADR-0035）。
+    if (!this._alive || this.resident) return;
     if (!this.isRunning()) this.forceShutdownOnIdle = false;
     this.idleTimer = setTimeout(() => {
       if (this.isRunning() && !this.forceShutdownOnIdle) {
@@ -468,14 +481,18 @@ const sessionRegistry = new Map<string, AgentSessionWrapper>();
 const startLocks = new Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>>();
 
 // 信号钩子只注册一次：SIGTERM/SIGINT 时对全部会话先发 session_shutdown 再 dispose。
+// 首个会话注册时挂上；服务入口也会在监听前主动挂一次，这样还没打开任何会话的容器收到
+// SIGTERM 同样走这里以 0 退出，而不是 Node 默认的 143。
 let signalHandlersRegistered = false;
 
-function registerSignalHandlers(): void {
+export function registerSignalHandlers(): void {
   if (signalHandlersRegistered) return;
   signalHandlersRegistered = true;
-  const shutdownAll = () => {
+  const shutdownAll = (signal: NodeJS.Signals) => {
     // 双 key 注册会让同一 wrapper 出现两次：按对象去重，shutdown/destroy 幂等但别重复跑
     const sessions = Array.from(new Set(sessionRegistry.values()));
+    // 容器 stop 只给 10 秒宽限期：这一行是运维判断「优雅退出确实走到了」的依据（docs/deploy.md）。
+    console.log(`[bridge] 收到 ${signal}，先向 ${sessions.length} 个会话发 session_shutdown 再退出`);
     void Promise.allSettled(sessions.map((session) => session.shutdown())).then(() => {
       // Node 无法在 exit handler 里 await，这里同步收尾作为最后兜底
       sessions.forEach((session) => session.destroy());
@@ -529,7 +546,7 @@ export async function startWorkspaceSession(
   sessionKey: string,
   workPath: string,
   toolContext: SessionToolContext,
-  options: { sessionFile?: string; thinkingLevel?: ThinkingLevel } = {},
+  options: { sessionFile?: string; thinkingLevel?: ThinkingLevel; homeDir?: string; resident?: boolean } = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const existing = sessionRegistry.get(sessionKey);
   if (existing?.isAlive()) return { session: existing, realSessionId: existing.sessionId };
@@ -545,15 +562,16 @@ export async function startWorkspaceSession(
       : SessionManager.create(workspaceDir, workspaceDir, { id: sessionKey });
     const agentDir = getAgentDir();
     const settingsManager = SettingsManager.create(workspaceDir, agentDir);
-    const stylePath = join(workspaceDir, "style.md");
-    const style = existsSync(stylePath) ? readFileSync(stylePath, "utf8").trim() : "";
+    // 全局 USER.md + 会话 style.md 在会话构造时读一次（ADR-0031：切换风格靠 reload 重读）；
+    // 会话级引导块无条件附带，所以 appendSystemPrompt 总是有内容（ADR-0036）。
+    const appendedSystemPrompt = buildAppendedSystemPrompt(options.homeDir, workspaceDir);
     const services = await createAgentSessionServices({
       cwd: workspaceDir,
       agentDir,
       settingsManager,
       resourceLoaderOptions: {
         extensionFactories: [createPiTeacherExtension(toolContext)],
-        ...(style ? { appendSystemPrompt: [style] } : {}),
+        appendSystemPrompt: [appendedSystemPrompt],
       },
     });
     // 即使尚无对话消息，set_model 也已经持久化；重新打开不能被默认模型覆盖。
@@ -569,6 +587,7 @@ export async function startWorkspaceSession(
       await inner.bindExtensions({ mode: "rpc" });
       const wrapper = new AgentSessionWrapper(inner as unknown as AgentSessionLike, {
         onAgentRunComplete: emitAgentRunComplete,
+        ...(options.resident ? { resident: true } : {}),
       });
       registerWrapper(wrapper, sessionKey);
       return { session: wrapper, realSessionId: inner.sessionId };

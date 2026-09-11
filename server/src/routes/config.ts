@@ -1,5 +1,5 @@
 /**
- * Pi 配置路由：provider / 模型定义、默认模型与受控运行设置。
+ * Pi 配置路由：provider / 模型定义、默认模型、受控运行设置、全局 Markdown 与用户环境变量。
  *
  * 所有读写都走 server/src/config/pi-config.ts，本文件只负责 HTTP 形状与鉴权，
  * 不直接触碰 models.json 或 settings.json——secret 的脱敏规则只应有一处实现。
@@ -13,6 +13,9 @@ import {
   readSettingsJson, readSettingsJsonPatch, saveProvider, writeDefaultModel, writeSettingsJson,
 } from "../config/pi-config.ts";
 import { getModelCatalog, refreshModelCatalog } from "../session/models.ts";
+import { readHomeMarkdown, readHomeMarkdownContent, writeHomeMarkdown, type HomeMarkdownKind } from "../config/home-markdown.ts";
+import { applyUserEnvPatch, deleteUserEnv, listUserEnv, readUserEnvPatch } from "../config/user-env.ts";
+import { APP_SETTINGS_FIELDS, readAppSettings, readAppSettingsPatch, writeAppSettings } from "../config/app-settings.ts";
 
 export function createConfigRouter(state: AppState): Router {
   const router = Router();
@@ -74,13 +77,53 @@ export function createConfigRouter(state: AppState): Router {
     res.json({ success: true, defaultModel: readDefaultModel(state.homeDir) });
   });
 
+  // 运行设置分两半：`settings` 是 Pi 的 settings.json 受控字段，`app` 是 pi-teacher 自己的
+  // 业务设置（setting 表，ADR-0036）。同一个 PATCH 可以混着传，路由先按字段名拆开。
+  const settingsView = () => ({ settings: readSettingsJson(state.homeDir), app: readAppSettings(state.db), defaultModel: readDefaultModel(state.homeDir) });
+
   router.get("/settings", (_req, res) => {
-    res.json({ settings: readSettingsJson(state.homeDir), defaultModel: readDefaultModel(state.homeDir) });
+    res.json(settingsView());
   });
 
   router.patch("/settings", async (req, res) => {
-    await writeSettingsJson(state.homeDir, readSettingsJsonPatch(readBody(req.body)));
-    res.json({ success: true, settings: readSettingsJson(state.homeDir), defaultModel: readDefaultModel(state.homeDir) });
+    const body = readBody(req.body);
+    const appBody: Record<string, unknown> = {};
+    const piBody: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) (APP_SETTINGS_FIELDS.has(key as never) ? appBody : piBody)[key] = value;
+    const appPatch = readAppSettingsPatch(appBody);
+    // Pi 字段先校验后写入，避免业务字段已落库而 Pi 字段被拒的半成功；Pi 部分为空时跳过其「至少一个字段」检查。
+    const piPatch = Object.keys(piBody).length ? readSettingsJsonPatch(piBody) : null;
+    if (!piPatch && !Object.keys(appPatch).length) throw new HttpError(400, "至少要提供一个受控运行设置字段");
+    if (piPatch) await writeSettingsJson(state.homeDir, piPatch);
+    writeAppSettings(state.db, appPatch);
+    res.json({ success: true, ...settingsView() });
+  });
+
+  // 全局 USER.md 与全局 AGENTS.md：都在下次开会话 / 切换风格重载时进入 system prompt
+  // （前者经 appendSystemPrompt 合并，后者由 Pi 祖先遍历发现）。会话级 pi-session-user.md 没有 API。
+  for (const kind of ["user-preferences", "global-agents-md"] as HomeMarkdownKind[]) {
+    router.get(`/${kind}`, (_req, res) => {
+      res.json(readHomeMarkdown(state.homeDir, kind));
+    });
+    router.put(`/${kind}`, (req, res) => {
+      writeHomeMarkdown(state.homeDir, kind, readHomeMarkdownContent(readBody(req.body), kind));
+      res.json({ success: true });
+    });
+  }
+
+  // 用户环境变量（ADR-0034）：表是唯一源，保存 / 删除后立即同步 process.env，skill 子进程下次调用即生效。
+  router.get("/user-env", (_req, res) => {
+    res.json({ items: listUserEnv(state.db) });
+  });
+
+  router.patch("/user-env", (req, res) => {
+    applyUserEnvPatch(state.db, readUserEnvPatch(readBody(req.body)));
+    res.json({ success: true, items: listUserEnv(state.db) });
+  });
+
+  router.delete("/user-env/:key", (req, res) => {
+    deleteUserEnv(state.db, req.params.key);
+    res.json({ success: true, items: listUserEnv(state.db) });
   });
 
   return router;

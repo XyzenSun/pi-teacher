@@ -15,17 +15,39 @@
  *     分支仍发一条真实 prompt 让消息落盘，父进程据此区分「只有 header」与
  *     「真实对话过」。
  *
+ * ADR-0035（助教常驻）：两个分支都同时打开 seed 出来的固定助教（resident: true）。
+ *   - 空闲回收分支：学习 wrapper 被回收后助教必须仍 isAlive()（TA_ALIVE_AFTER_RECLAIM=1），
+ *     随后显式 shutdown 助教，注册表才真正清空（WRAPPERS_CLEAN=1）并退出。
+ *   - stay-alive 分支：SIGTERM 时助教与学习会话一起被 shutdown（父进程数两次 disposed）。
+ *
  * 参数 `stay-alive` → 等父进程 SIGTERM 后优雅退出（父进程断言 0 退出码）；
  * 无参数 → 靠 PI_TEACHER_IDLE_TIMEOUT_MS 空闲回收自行退出（父进程验证回收）。
  */
 import path from "node:path";
 import Database from "better-sqlite3";
 import { initializeSchema } from "../db/schema.ts";
-import { createPiSession, sessionKeyFor } from "../session/repository.ts";
+import { createPiSession, getPiSession, sessionKeyFor } from "../session/repository.ts";
 import { toolContextFor } from "../tools/context.ts";
-import { startWorkspaceSession, getSessionWrapper } from "../bridge/agent-session-wrapper.ts";
+import { startWorkspaceSession, getSessionWrapper, type AgentSessionWrapper } from "../bridge/agent-session-wrapper.ts";
 
 const stayAlive = process.argv[2] === "stay-alive";
+
+/** 两条会话共用的打点：dispose 与 session_shutdown 都写 stdout，父进程按出现次数断言。 */
+function instrument(wrapper: AgentSessionWrapper, label: string): void {
+  wrapper.onDestroy(() => {
+    console.log(`[child] disposed ${label}`);
+    process.send?.("disposed");
+  });
+  const originalEmit = wrapper.inner.extensionRunner?.emit?.bind(wrapper.inner.extensionRunner);
+  if (typeof originalEmit !== "function") return;
+  // 包装签名放宽到 SDK 实际调用形态（含角标事件类型），内部只对 session_shutdown 打点
+  const runner = wrapper.inner.extensionRunner as { emit: (event: any) => Promise<unknown> };
+  runner.emit = async (event: any) => {
+    // 只打点 session_shutdown——SDK 的 emit 会被多种事件调用，刷屏会淹没断言
+    if (event?.type === "session_shutdown") console.log(`[child] shutdown_emitted ${label}`);
+    return originalEmit(event);
+  };
+}
 
 async function main(): Promise<void> {
   const homeDir = process.env.PI_TEACHER_LIFECYCLE_HOME!;
@@ -49,23 +71,20 @@ async function main(): Promise<void> {
     toolContext,
     { sessionFile: piRow.path },
   );
+  instrument(wrapper, "learn");
 
-  // 打点：dispose 执行了、session_shutdown emit 走了 extensionRunner（写 stdout 让父进程能断言）
-  wrapper.onDestroy(() => {
-    console.log("[child] disposed");
-    process.send?.("disposed");
-  });
-  const originalEmit = wrapper.inner.extensionRunner?.emit?.bind(wrapper.inner.extensionRunner);
-  if (typeof originalEmit === "function") {
-    // 包装签名放宽到 SDK 实际调用形态（含角标事件类型），内部只对 session_shutdown 打点
-    const runner = wrapper.inner.extensionRunner as { emit: (event: any) => Promise<unknown> };
-    runner.emit = async (event: any) => {
-      // 只打点 session_shutdown——SDK 的 emit 会被多种事件调用，刷屏会淹没断言
-      if (event?.type === "session_shutdown") {
-        console.log("[child] shutdown_emitted");
-      }
-      return originalEmit(event);
-    };
+  // 固定助教由 seed 建出（space 0 下唯一一条），与生产路由一样以 resident 打开。
+  const taRow = getPiSession(db, (db.prepare("SELECT id FROM pi_session WHERE space_id = 0").get() as { id: number }).id);
+  const { session: taWrapper } = await startWorkspaceSession(
+    sessionKeyFor(taRow.id),
+    taRow.work_path,
+    toolContextFor(db, taRow),
+    { sessionFile: taRow.path, resident: true },
+  );
+  instrument(taWrapper, "ta");
+  if (!taWrapper.isResident() || wrapper.isResident()) {
+    console.error("[child] resident 标记错位：助教应常驻、学习会话不应常驻");
+    process.exit(7);
   }
 
   const sessionFile = wrapper.sessionFile;
@@ -83,23 +102,34 @@ async function main(): Promise<void> {
   }
   process.send?.(`SESSION_FILE=${sessionFile}`);
   process.send?.(`WORK_PATH=${piRow.work_path}`);
-  console.log(`[child] sessionFile=${sessionFile} realSessionId=${realSessionId} piId=${piRow.id}`);
+  process.send?.(`TA_WORK_PATH=${taRow.work_path}`);
+  console.log(`[child] sessionFile=${sessionFile} realSessionId=${realSessionId} piId=${piRow.id} taId=${taRow.id}`);
 
-  // 轮询注册表：wrapper 被回收后发 WRAPPERS_CLEAN=1 并退出（空闲回收验证用）。
+  // 轮询注册表：学习 wrapper 被回收后，断言助教仍活着，再显式关掉助教（常驻会话只有
+  // 这一条路径能结束），注册表清空后发 WRAPPERS_CLEAN=1 并退出（空闲回收验证用）。
   // stay-alive 模式不改写此逻辑：父进程 SIGTERM 由信号处理器接管。
   const deadline = Date.now() + 120_000;
+  let finishing = false;
   const timer = setInterval(() => {
     if (Date.now() > deadline) {
       console.error("[child] 等待回收超时");
       process.exit(4);
     }
-    if (!getSessionWrapper(sessionFile) && !getSessionWrapper(sessionKeyFor(piRow.id))) {
+    if (finishing || getSessionWrapper(sessionFile) || getSessionWrapper(sessionKeyFor(piRow.id))) return;
+    finishing = true;
+    clearInterval(timer);
+    void (async () => {
+      // 学习会话已被空闲回收；助教此刻必须还在注册表里且活着（ADR-0035）。
+      const taStillAlive = getSessionWrapper(sessionKeyFor(taRow.id))?.isAlive() === true;
+      console.log(`[child] TA_ALIVE_AFTER_RECLAIM=${taStillAlive ? 1 : 0}`);
+      await taWrapper.shutdown();
+      const clean = !getSessionWrapper(sessionKeyFor(taRow.id)) && !getSessionWrapper(sessionKeyFor(piRow.id));
       // IPC 消息在紧接着的 process.exit 时可能丢帧（fork 竞态），标志写 stdout
       // 父进程从输出里断言，不依赖 IPC 送达
-      console.log("[child] WRAPPERS_CLEAN=1 注册表已空，退出");
+      console.log(`[child] WRAPPERS_CLEAN=${clean ? 1 : 0} 注册表${clean ? "已空" : "未空"}，退出`);
       db.close();
-      process.exit(0);
-    }
+      process.exit(clean ? 0 : 8);
+    })();
   }, 500);
 
   if (stayAlive) {

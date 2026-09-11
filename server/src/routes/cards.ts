@@ -11,9 +11,6 @@
  * 恢复时有调度行的卡直接回 normal（复习进度原样回来），没有的回 proposed。
  * 「改状态」与「建/保留调度」是同一个业务动作，全部放进事务，避免出现
  * normal 却无调度行（复习队列取不到）这种半成品。
- *
- * 卡面一律不返回 source_essence_path：它是部署机上的绝对路径（数据库与目录结构设计.md
- * card 表），前端只需要知道「有没有精华来源」，故只投出 has_source_essence。
  */
 import { Router } from "express";
 import type { Request, Response } from "express";
@@ -40,14 +37,10 @@ export function readTriStateFilter(value: unknown, label = "status"): TriStateFi
   throw new HttpError(400, `${label} 只能是 proposed / normal / deleted / all`);
 }
 
-/**
- * 前端可见的卡片投影：列名逐个写出，不用 SELECT *——card 表里的
- * source_essence_path 不能出网。调度字段来自 LEFT JOIN，proposed 卡为 null。
- */
+/** 前端卡片契约显式列出字段；调度来自 LEFT JOIN，没有调度的 proposed 卡为 null。 */
 const CARD_VIEW_SQL = `
   SELECT c.id, c.topic_id, t.name AS topic_name, c.front, c.back, c.status,
          c.reason_and_remark, c.created_at,
-         CASE WHEN c.source_essence_path IS NULL THEN 0 ELSE 1 END AS has_source_essence,
          cs.state AS schedule_state, cs.due AS schedule_due,
          cs.reps AS schedule_reps, cs.lapses AS schedule_lapses
   FROM card c
@@ -64,7 +57,6 @@ interface CardView {
   status: string;
   reason_and_remark: string | null;
   created_at: string;
-  has_source_essence: number;
   schedule_state: string | null;
   schedule_due: string | null;
   schedule_reps: number | null;

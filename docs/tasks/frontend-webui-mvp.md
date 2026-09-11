@@ -266,7 +266,7 @@ web/
 
 初始模板已写入：
 
-`提示词设计/提示词模板/agentsmd/助教.md`
+`提示词设计/提示词模板/agentsmd/助教.md`（2026-09-11 起改为 `server/src/prompts/defaults.ts` 的 `AGENTS_MD_TEMPLATES.ta`，原文件已删除）
 
 内容原则：
 

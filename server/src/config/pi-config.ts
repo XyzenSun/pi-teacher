@@ -428,8 +428,8 @@ export function readDefaultModel(cwd: string): DefaultModelView {
   const envModel = process.env.PI_TEACHER_MODEL;
   if (envProvider || envModel) {
     return {
-      provider: envProvider ?? settings.getDefaultProvider() ?? null,
-      modelId: envModel ?? settings.getDefaultModel() ?? null,
+      provider: envProvider || settings.getDefaultProvider() || null,
+      modelId: envModel || settings.getDefaultModel() || null,
       source: "env",
       editable: false,
     };

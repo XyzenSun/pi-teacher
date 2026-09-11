@@ -19,7 +19,7 @@
 
 ## 当前数据模型重构的实现未决
 
-暂无用户层面的未决问题。已确认：初始化时创建固定助教 Pi Session；`space.type` 与 `agents_md.type` 必须匹配；`review_topic_id` 仅允许出现在 `review` Space 的 Pi Session；初始助教模板见 `提示词设计/提示词模板/agentsmd/助教.md`。
+暂无用户层面的未决问题。已确认：初始化时创建固定助教 Pi Session；`space.type` 与 `agents_md.type` 必须匹配；`review_topic_id` 仅允许出现在 `review` Space 的 Pi Session；初始助教模板见 `server/src/prompts/defaults.ts` 的 `AGENTS_MD_TEMPLATES.ta`（原 `docs/提示词设计/` 已删除，出厂提示词全部进代码）。
 
 ## 真正未决的底层问题
 
@@ -63,7 +63,7 @@
 | 附件 | 属于本次 MVP；上传保存到当前 Pi Session 的 `work_path/attachments/`，后端补上传接口 | 本次对齐 |
 | SPA 工程 | React Router；Vite `/api` proxy；生产 Express serve `web/dist` + SPA fallback | 本次对齐 |
 | 模型 | 增加模型查询/切换 API，模型选择器通过 `set_model` 修改当前 Pi Session | 本次对齐 |
-| 管理入口 | 左下角 2×2 Dock：系统设置、学习日历、知识卡库、帮助指南。设置为 `/app` 之上的路由覆盖层 modal，在同一面板切换 Card、Glossary、Topic、Agents Md、Teach Style、账号、模型与 Provider、高级配置八个子页 | 本次对齐 |
+| 管理入口 | 左下角 2×2 Dock：系统设置、学习日历、知识卡库、帮助指南。设置为 `/app` 之上的路由覆盖层 modal，在同一面板切换 Card、Glossary、Topic、Agents Md、Teach Style、用户偏好、账号、模型与 Provider、高级配置九个子页 | 本次对齐 |
 | 会话设定入口 | 模型、制卡开关、教学风格三者直接放在输入区控制条，可见可操作，不折叠进二级菜单；全部真实写后端并回读 | 本次对齐 |
 | 卡片审批交互 | 第三栏上部固定 38% 高度、单卡浏览：左右切换、翻面、`n / 总数` 序号、Topic 切换重置，确认/拒绝后索引自然前进 | 本次对齐 |
 | 页面内交互 | 重命名、删除确认一律用页面内 `InlineEdit` / `ConfirmDialog`，正常路径不使用 `window.prompt` / `alert` / `confirm` | 本次对齐 |

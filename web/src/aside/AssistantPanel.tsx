@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
+import { conversationsApi } from "../api/client.ts";
 import { indexToolResults, useConversation } from "../chat/useConversation.ts";
 import { MessageView } from "../chat/MessageView.tsx";
+import { ConfirmDialog } from "../ui/Overlays.tsx";
 
 interface AssistantPanelProps {
   taSessionId: number;
@@ -16,6 +18,9 @@ export function AssistantPanel({ taSessionId, mainConversationId }: AssistantPan
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
   const composingRef = useRef(false);
   const toolResults = useMemo(() => indexToolResults(session.messages), [session.messages]);
   const recent = session.messages.slice(-30);
@@ -36,12 +41,51 @@ export function AssistantPanel({ taSessionId, mainConversationId }: AssistantPan
     }
   };
 
+  // 清除（ADR-0035）：后端换新 JSONL 并已常驻重开，前端只需重连 SSE；connected 事件会重新拉取（空）历史。
+  const clearConversation = async () => {
+    setClearing(true);
+    setClearError(null);
+    try {
+      await conversationsApi.clear(taSessionId);
+      setConfirmingClear(false);
+      await session.reopen();
+    } catch (cause) {
+      setClearError(cause instanceof Error ? cause.message : "清除失败");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-0 flex-1">
       <div className="h-11 shrink-0 px-3 border-b border-line flex items-center justify-between">
         <span className="label flex items-center gap-1"><span className="icon text-[16px] text-secondary">support_agent</span>助教</span>
-        <span className="text-[11px] text-muted">{session.status === "connected" ? "已连接" : session.status === "recycled" ? "已回收" : session.status === "reconnecting" ? "重连中" : "连接中"}</span>
+        <span className="flex items-center gap-2">
+          <span className="text-[11px] text-muted">{session.status === "connected" ? "已连接" : session.status === "recycled" ? "已回收" : session.status === "reconnecting" ? "重连中" : "连接中"}</span>
+          <button
+            type="button"
+            className="icon text-[16px] text-on-surface-variant hover:text-error disabled:opacity-50"
+            title="清除对话"
+            aria-label="清除对话"
+            disabled={busy || isRunning || clearing}
+            onClick={() => { setClearError(null); setConfirmingClear(true); }}
+          >
+            delete_sweep
+          </button>
+        </span>
       </div>
+      {confirmingClear && (
+        <ConfirmDialog
+          title="清除助教对话"
+          danger
+          busy={clearing}
+          error={clearError}
+          message="清空助教的全部对话记录？助教对你的要求（pi-session-user.md）与上传的文件会保留。"
+          confirmLabel="清除"
+          onCancel={() => { if (!clearing) setConfirmingClear(false); }}
+          onConfirm={() => void clearConversation()}
+        />
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-[13px]">
         {session.error && (
           <div className="rounded-md bg-error-container text-on-error-container px-2 py-1 text-[12px] flex items-center justify-between gap-2">

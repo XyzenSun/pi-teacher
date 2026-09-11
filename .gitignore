@@ -11,3 +11,7 @@ dist/
 
 # dev 验证数据（冒烟测试每次重建）
 server/dev-data/
+
+# compose.yaml 默认挂载目录（宿主侧的 ~/pi-teacher 与 ~/.pi/agent），含数据库与 API key
+/pi-teacher/
+/pi-agent/

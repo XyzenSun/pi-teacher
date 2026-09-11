@@ -106,7 +106,6 @@ export interface Card {
   status: TriState;
   reason_and_remark: string | null;
   created_at: string;
-  has_source_essence: number;
   schedule_state: string | null;
   schedule_due: string | null;
   schedule_reps: number | null;
@@ -179,7 +178,38 @@ export interface PiSettingsView {
   retry: RetrySettingsView;
 }
 
-export interface PiSettingsResponse { settings: PiSettingsView; defaultModel: DefaultModelConfig }
+/** 基础三段文案按类型与制卡开关选取；学习会话同轮追加精华段（ADR-0036 / ADR-0039）。 */
+export type ReminderKind = "makeCardOn" | "makeCardOff" | "ta" | "learningEssence";
+
+export interface AppSettingsView {
+  /** 维护提醒间隔（轮）；0 = 关闭。 */
+  reminderIntervalTurns: number;
+  /** 当前生效的文案；用户没改过的就是出厂文案。 */
+  reminderTexts: Record<ReminderKind, string>;
+}
+
+/** 文案补丁：空串表示恢复出厂文案。 */
+export interface AppSettingsPatch {
+  reminderIntervalTurns?: number;
+  reminderTexts?: Partial<Record<ReminderKind, string>>;
+}
+
+export interface PiSettingsResponse { settings: PiSettingsView; app: AppSettingsView; defaultModel: DefaultModelConfig }
+/** homeDir 下用户直接编辑的 Markdown；path 只是相对文件名，用于界面提示。 */
+export type HomeMarkdownKind = "user-preferences" | "global-agents-md";
+export interface HomeMarkdownResponse { content: string; path: string }
+
+/** 用户环境变量（ADR-0034）：明文存储、明文回显；内置项未设置也在列，此时没有 value。 */
+export interface UserEnvItem {
+  key: string;
+  builtin: boolean;
+  configured: boolean;
+  value?: string;
+  description?: string;
+}
+export interface UserEnvResponse { items: UserEnvItem[] }
+/** `{ [key]: value }`，值必须非空，直接覆盖。 */
+export type UserEnvPatch = Record<string, string>;
 
 /** provider 补丁：apiKey / header 值遵循三态（缺省保持、字符串覆盖、null 清除）。 */
 export interface ProviderPatch {

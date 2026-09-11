@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { promptsApi } from "../api/client.ts";
 import type { AgentsMd, PromptsResponse, SpaceType, TeachStyle } from "../api/types.ts";
 import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { HomeMarkdownEditor } from "./UserPreferencesTab.tsx";
 import { ConfirmDialog, Modal } from "../ui/Overlays.tsx";
 
 const TYPE_LABEL: Record<SpaceType, string> = { learn: "学习", review: "复习", ta: "助教" };
@@ -75,6 +76,17 @@ export function AgentsMdTab() {
       </div>
       <ErrorLine error={error} />
       {notice && <div className="text-[12px] text-on-secondary-container bg-secondary-container rounded-md px-3 py-2">{notice}</div>}
+      {/* 全局 AGENTS.md 不是模板：它由 Pi 祖先遍历直接进入每个会话，与下面按类型投影的模板叠加。 */}
+      <section className="card p-4">
+        <HomeMarkdownEditor
+          kind="global-agents-md"
+          maxLength={20000}
+          rows={14}
+          monospace
+          title="全局 AGENTS.md"
+          description="所有对话共用的规则（教学原则、目录布局、工具调用原则），直接编辑 ~/pi-teacher/AGENTS.md。与下面按类型选择的模板叠加，下次打开或重载对话时生效。"
+        />
+      </section>
       {grouped.map(([type, items]) => (
         <section key={type} className="space-y-2">
           <div className="label">{TYPE_LABEL[type]}模板</div>

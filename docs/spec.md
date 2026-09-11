@@ -97,3 +97,43 @@ bug影响与触发条件: `fill` 不触发键盘事件（斜杠菜单要用 `typ
 bug原因: http-smoke「下一轮不再注入主会话简介」对整段 provider payload 做 `includes("<pi-teacher-context>")`。某轮真模型在回答里照抄了标签名，这段 assistant 文本进入会话历史后，下一轮 payload 必然含该字样，断言误报泄漏。
 bug影响与触发条件: 任何「注入内容不落历史」类断言，只要模型有可能复述标签/关键字就会随机失败；失败片段只截 payload 前 300 字，看到的永远是系统提示词开头，定位不到来源。
 解决方法: 解析 payload 的 `messages`，只把非 assistant 消息里出现信封算作我们的注入（`payloadHasNonAssistantEnvelope`）；诊断片段用 `excerptAround` 取命中点前后而不是开头。与「真模型验收不能用注入文本里的字样做断言」是同一原则的 payload 侧版本。
+
+### 浏览器验收不知道真实账号密码，也不能碰真实 ~/pi-teacher
+bug原因: 开发环境的后端跑在用户真实数据目录上，账号密码只有用户知道；用 http-smoke 的密码去登只会得到「用户名或密码错误」，改真实库又违反「不动用户数据」。
+bug影响与触发条件: 任何需要登录的真浏览器验收。
+解决方法: 起第二套隔离环境：`PI_TEACHER_HOME=$(mktemp -d) PORT=39872 npm run dev` 后 `curl POST /api/auth/setup` 建一次性账号；前端 `PI_TEACHER_API_PORT=39872 npx vite --port 5177`（`vite.config.ts` 用 `loadEnv` 读该变量决定代理目标）。验收完 kill 两个 PID 并删临时目录，用户自己的 39871 / 5176 不受影响。
+
+### 运行期改 `process.env` 对 Pi 的 bash 工具立即生效，不必重开会话
+bug原因: 直觉上子进程环境在会话创建时就固定了。实际 pi-coding-agent 0.84.2 的 bash 工具每次执行都走 `resolveSpawnContext` → `getShellEnv()`，后者当场 `{ ...process.env }`（`dist/core/tools/bash.js`、`dist/utils/shell.js`），没有任何缓存。
+bug影响与触发条件: 决定「保存用户环境变量要不要 reload 会话」时容易多做一步；反过来，验证脚本若只查 `process.env` 而不真的 spawn，证明不了 skill 能看到。
+解决方法: 保存后只写 `process.env`（`config/user-env.ts`）；断言用真模型让 bash 执行 `echo $KEY` 并检查 toolResult 内容（http-smoke [8b]）。注意 `tsx` 的 `--env-file` 等启动期注入不在此列——那些只影响进程启动时的初值。
+
+### `pkill -f "PORT=39872"` 同样会杀掉发出命令的 shell
+bug原因: 与上面 `pkill -f "tsx src/index.ts"` 同一机制——模式字串出现在自己的命令行里。用环境变量赋值当匹配串（`PORT=`、`PI_TEACHER_HOME=`）时尤其容易忽略这一点。
+bug影响与触发条件: 一条复合命令里先 `kill <pid>` 再 `pkill -f` 兜底，兜底反而把后续的 `rm -rf` 临时目录、`ss` 检查全部截断（退出码 144），看起来像清理成功实则没做。
+解决方法: 清理隔离验收环境只按记录的 PID `kill`，再用 `ss -lptn 'sport = :PORT'` 确认端口空了；不要用 `pkill -f` 兜底。
+
+### 同一会话挂两条 SSE 时，第二条收不到 `session_recycled`
+bug原因: `AgentSessionWrapper.emit` 直接 `for…of this.listeners`，而 SSE 流的 `forwardEvent` 收到 `session_recycled` 后同步 `cleanup` → `unsubscribe`，即 `listeners.splice(i, 1)`。遍历中删除当前元素让下一个监听者被跳过。
+bug影响与触发条件: 只要同一会话有 ≥2 个监听者（浏览器重连后旧流未断、验收脚本先 `openEvents` 再 reopen 又 `openEvents`），destroy 时只有第一条流收到回收事件并关闭，第二条一直挂着；`waitFor(session_recycled)` 超时，看起来像删除没 shutdown。单条 SSE 的场景完全正常，所以此前没暴露。
+解决方法: `emit` 遍历 `[...this.listeners]` 快照。http-smoke [10] 故意在 [9] 留下的第二条流上断言也收到 `session_recycled`。
+
+### 清除助教后新 JSONL 不是「只有 header」
+bug原因: `createEmptySessionFile` 只写 SDK header，但 `startWorkspaceSession` 重开时 `createAgentSessionFromServices` 立即把默认模型与思考等级落盘（`model_change`、`thinking_level_change` 两条），空历史文件实际有 3 行。
+bug影响与触发条件: 断言「清除后 JSONL 只有一行」必然失败；按行数判断「空对话」也会误判。
+解决方法: 判断空历史只看有没有 `type === "message"` 条目，header 的 `id` 仍等于 `sessionKeyFor(id)`。
+
+### `npm ci --omit=dev` 在 slim 镜像里对 better-sqlite3 合成 `node-gyp rebuild`
+bug原因: better-sqlite3 13 的 package.json 写了 `gypfile: false` 且自带 `prebuilds/linux-x64.node`，宿主机 `npm install` 从不编译。但 `npm ci` 按 lockfile 建树，lockfile 只记 `hasInstallScript`，不记 `gypfile`；npm 11 的 `@npmcli/arborist/lib/install-scripts.js` 看到磁盘上有 `binding.gyp` 就合成一条 `install: node-gyp rebuild`，`node:24-slim` 没有 Python / make / g++，构建在 `server-deps` 阶段失败。
+bug影响与触发条件: 任何在 lockfile 驱动下装 better-sqlite3 的精简镜像；宿主机复现方法是把 `package.json` + `package-lock.json` 拷到空目录跑 `npm ci --omit=dev --foreground-scripts`，能看到 `> better-sqlite3@13.0.3 install / > node-gyp rebuild`。
+解决方法: Dockerfile 用 `npm ci --omit=dev --ignore-scripts`。运行时 `lib/binding.js` 直接 `require('../prebuilds/linux-x64.node')`，不需要 `build/`；其余带 install 脚本的生产依赖（esbuild 的 `install.js` 只校验 `@esbuild/linux-x64`、protobufjs 的 postinstall 只整理版本号、`@google/genai` 的 preinstall 是 echo）跳过也不影响运行。镜像里依旧没有 python3，`verify:remote` 已在容器上跑通。
+
+### compose 的 `${VAR:-}` 会把未设置的环境变量变成空串
+bug原因: `compose.yaml` 用 `PI_TEACHER_PROVIDER=${PI_TEACHER_PROVIDER:-}` 透传可选变量，宿主没设时容器里得到的是 `PI_TEACHER_PROVIDER=`（空串）而不是「没有这个变量」。后端 `selectDefaultModel` 与 `readDefaultModel` 用 `??` 取值，空串不是 nullish，默认模型变成 `""`，`settings.json` 的默认值被空串遮住。
+bug影响与触发条件: 只在容器里、且没有显式设 `PI_TEACHER_PROVIDER` / `PI_TEACHER_MODEL` 时；宿主机直跑不会出现（变量真的不存在）。
+解决方法: 读这两个变量的地方一律 `||`（`session/models.ts`、`config/pi-config.ts`），`assertDefaultModelEditable` 本来就是真值判断不受影响。新增可选透传变量时照此办理，或者在 compose 里不写默认值让变量整体缺席。
+
+### HTTP payload 验收会误取自动标题生成请求
+bug原因: `session/title-generator.ts` 为独立标题调用创建临时 Agent 时复用来源 Agent 的 `onPayload`，因此同一捕获数组也会收到标题请求。最后一次请求的最后一条 user 消息可能是 `TITLE_PROMPT`，不是本轮用户输入。
+bug影响与触发条件: 尚未命名的 Pi Session 首轮结束后自动生成标题；真实复习会话复现为同一轮捕获两次请求，按数组末项断言基础提醒会失败，第二轮不再生成标题时又能通过。这不等于精华提醒泄漏进复习会话。
+解决方法: `verify/http-smoke.ts` 用 `payloadForPrompt()` 按本轮原始输入定位对话请求，再严格比较整条用户消息与基础 / 精华文案；历史检查也读取该请求。不要禁用标题生成来规避，也不要只检查整个 payload 是否包含提醒字样。

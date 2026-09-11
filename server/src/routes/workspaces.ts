@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { AppState } from "./app-state.ts";
 import type { SpaceRow } from "../db/types.ts";
 import { HttpError, readBody, readId, readText } from "./http.ts";
-import { getSpace, listPiSessionRows, sessionKeyFor } from "../session/repository.ts";
+import { deletePiSession, getSpace, listPiSessionRows, sessionKeyFor } from "../session/repository.ts";
 import { conversationView } from "../session/session-reader.ts";
 import { getSessionWrapper } from "../bridge/agent-session-wrapper.ts";
 
@@ -42,19 +42,21 @@ export function createWorkspacesRouter(state: AppState): Router {
     res.json({ success: true });
   });
 
+  /**
+   * 删 Space = 逐条真删除其 Pi Session（ADR-0037：行 + JSONL），再删 space 行。
+   * 运行中的对话先 abort 再 shutdown——用户已在 ConfirmDialog 确认，不再用 409 挡。
+   * 工作目录里的用户产出与上传文件保留，界面确认文案如此说明。
+   */
   router.delete("/:id", async (req, res) => {
     const space = getSpace(state.db, readId(req.params.id, "Space id", true));
     if (space.type !== "learn") throw new HttpError(403, "固定助教与复习 Space 不可删除");
-    const sessions = listPiSessionRows(state.db, space.id);
-    if (sessions.some((row) => getSessionWrapper(sessionKeyFor(row.id))?.isRunning())) {
-      throw new HttpError(409, "Space 中还有运行中的对话，请先停止再删除");
+    for (const row of listPiSessionRows(state.db, space.id)) {
+      const wrapper = getSessionWrapper(sessionKeyFor(row.id));
+      if (wrapper?.isRunning()) await wrapper.send({ type: "abort" });
+      await wrapper?.shutdown();
+      deletePiSession(state.db, row);
     }
-    await Promise.all(sessions.map((row) => getSessionWrapper(sessionKeyFor(row.id))?.shutdown()));
-    state.db.transaction(() => {
-      state.db.prepare("DELETE FROM pi_session WHERE space_id = ?").run(space.id);
-      state.db.prepare("DELETE FROM space WHERE id = ?").run(space.id);
-    })();
-    // 删除收纳关系不递归清除用户学习产出；界面确认时明确说明磁盘文件保留。
+    state.db.prepare("DELETE FROM space WHERE id = ?").run(space.id);
     res.json({ success: true, filesRetained: true });
   });
   return router;

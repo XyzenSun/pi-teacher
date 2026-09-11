@@ -24,11 +24,15 @@ import { createLoginSession } from "../auth/session-store.ts";
 import { createAttachmentsRouter } from "../routes/attachments.ts";
 import { apiErrorHandler } from "../routes/http.ts";
 import {
+  describeNonImageAttachments,
   encodeAttachmentId,
+  formatAttachmentSize,
   getAttachment,
+  isImageAttachment,
   listAttachments,
   readAttachmentImage,
   readAttachmentImages,
+  renameLegacyAttachmentDirs,
 } from "../session/attachments.ts";
 
 let passed = 0;
@@ -104,7 +108,7 @@ async function main(): Promise<void> {
   db.pragma("foreign_keys = ON");
   createMinimalSchema(db);
 
-  // 三个会话：正常会话 / attachments 是符号链接的会话 / work_path 已被删的会话
+  // 三个会话：正常会话 / files 是符号链接的会话 / work_path 已被删的会话
   const workPath = path.join(homeDir, "learn", "2", "pi", "1");
   const sessionId = insertPiSession(db, workPath);
   const linkedWorkPath = path.join(homeDir, "learn", "2", "pi", "2");
@@ -117,7 +121,7 @@ async function main(): Promise<void> {
   const outsideDir = path.join(homeDir, "outside");
   mkdirSync(outsideDir, { recursive: true });
   writeFileSync(path.join(outsideDir, "secret.txt"), "TOP-SECRET", "utf8");
-  symlinkSync(outsideDir, path.join(linkedWorkPath, "attachments"));
+  symlinkSync(outsideDir, path.join(linkedWorkPath, "files"));
 
   initCookieSigning("attachments-check-key");
   const cookie = buildSessionCookie(createLoginSession("xyzen").token).split(";")[0];
@@ -211,15 +215,15 @@ async function main(): Promise<void> {
     check(
       "返回契约 { id, relativePath, name, mimeType, size }",
       uploaded?.id === encodeAttachmentId("讲义封面.png") &&
-        uploaded?.relativePath === "attachments/讲义封面.png" &&
+        uploaded?.relativePath === "files/讲义封面.png" &&
         uploaded?.name === "讲义封面.png" &&
         uploaded?.mimeType === "image/png" &&
         uploaded?.size === PNG_BYTES.length,
       uploaded,
     );
-    const onDisk = await fs.readFile(path.join(workPath, "attachments", "讲义封面.png"));
-    check("字节原样落在 work_path/attachments/", onDisk.equals(PNG_BYTES));
-    const mode = (await fs.stat(path.join(workPath, "attachments", "讲义封面.png"))).mode & 0o777;
+    const onDisk = await fs.readFile(path.join(workPath, "files", "讲义封面.png"));
+    check("字节原样落在 work_path/files/", onDisk.equals(PNG_BYTES));
+    const mode = (await fs.stat(path.join(workPath, "files", "讲义封面.png"))).mode & 0o777;
     check("落盘权限 0600（附件只属于本机用户）", mode === 0o600, mode.toString(8));
 
     r = await upload(sessionId, "笔记.txt", Buffer.from("纯文本附件", "utf8"));
@@ -228,7 +232,7 @@ async function main(): Promise<void> {
 
     r = await upload(sessionId, "讲义封面.png", PNG_BYTES);
     check("同名附件冲突 409（绝不覆盖）", r.status === 409, { status: r.status, body: r.text });
-    const stillOriginal = await fs.readFile(path.join(workPath, "attachments", "讲义封面.png"));
+    const stillOriginal = await fs.readFile(path.join(workPath, "files", "讲义封面.png"));
     check("冲突后磁盘内容未被改写", stillOriginal.equals(PNG_BYTES));
 
     // 纯 ASCII 名字客户端可能不做 encodeURIComponent，要兼容
@@ -317,7 +321,7 @@ async function main(): Promise<void> {
     check(
       "被拒的超大文件没有落盘",
       !(await fs
-        .stat(path.join(workPath, "attachments", "超大.bin"))
+        .stat(path.join(workPath, "files", "超大.bin"))
         .then(() => true)
         .catch(() => false)),
     );
@@ -333,7 +337,7 @@ async function main(): Promise<void> {
     check(
       "未登录时文件未落盘（raw 解析器根本没运行）",
       !(await fs
-        .stat(path.join(workPath, "attachments", "anon.png"))
+        .stat(path.join(workPath, "files", "anon.png"))
         .then(() => true)
         .catch(() => false)),
     );
@@ -345,11 +349,11 @@ async function main(): Promise<void> {
     // ============ 4. 列表：从真实磁盘算 ============
     console.log("\n[4] 列表：磁盘即事实");
     // 模型自己写出的文件（没经过上传接口）也必须能被列出
-    writeFileSync(path.join(workPath, "attachments", "模型画的图.gif"), GIF_BYTES);
+    writeFileSync(path.join(workPath, "files", "模型画的图.gif"), GIF_BYTES);
     // 干扰项：符号链接、隐藏文件、非法名文件、子目录
-    symlinkSync(path.join(outsideDir, "secret.txt"), path.join(workPath, "attachments", "偷看.txt"));
-    writeFileSync(path.join(workPath, "attachments", ".hidden-note"), "hidden", "utf8");
-    mkdirSync(path.join(workPath, "attachments", "子目录"), { recursive: true });
+    symlinkSync(path.join(outsideDir, "secret.txt"), path.join(workPath, "files", "偷看.txt"));
+    writeFileSync(path.join(workPath, "files", ".hidden-note"), "hidden", "utf8");
+    mkdirSync(path.join(workPath, "files", "子目录"), { recursive: true });
 
     r = await request("GET", `/api/conversations/${sessionId}/attachments`);
     check("列表 200", r.status === 200, r.text);
@@ -367,7 +371,7 @@ async function main(): Promise<void> {
     );
     check(
       "列表每项都带 relativePath 且不含绝对路径",
-      (r.json?.attachments ?? []).every((a: any) => a.relativePath === `attachments/${a.name}`),
+      (r.json?.attachments ?? []).every((a: any) => a.relativePath === `files/${a.name}`),
       r.json,
     );
 
@@ -375,13 +379,13 @@ async function main(): Promise<void> {
     const emptyWorkPath = path.join(homeDir, "learn", "2", "pi", "4");
     const emptySessionId = insertPiSession(db, emptyWorkPath);
     r = await request("GET", `/api/conversations/${emptySessionId}/attachments`);
-    check("没有 attachments 目录时返回空数组", r.status === 200 && Array.isArray(r.json?.attachments) && r.json.attachments.length === 0, r.json);
+    check("没有 files 目录时返回空数组", r.status === 200 && Array.isArray(r.json?.attachments) && r.json.attachments.length === 0, r.json);
 
     r = await request("GET", `/api/conversations/${missingSessionId}/attachments`);
     check("work_path 已不存在时 404", r.status === 404, { status: r.status, body: r.text });
 
     // ============ 5. 符号链接目录：不许跨出去 ============
-    console.log("\n[5] attachments 目录是符号链接时一律 403");
+    console.log("\n[5] files 目录是符号链接时一律 403");
     r = await request("GET", `/api/conversations/${linkedSessionId}/attachments`);
     check("列表 403", r.status === 403, { status: r.status, body: r.text });
     r = await upload(linkedSessionId, "写进去.png", PNG_BYTES);
@@ -499,7 +503,7 @@ async function main(): Promise<void> {
     check("file-index 200", r.status === 200, r.text);
     const files: string[] = r.json?.files ?? [];
     check("q 为空时列出全部真实文件", files.includes("MISSION.md") && files.includes("essence/第一课.md"), files);
-    check("包含附件目录下的文件（相对路径带目录）", files.includes("attachments/讲义封面.png"), files);
+    check("包含会话文件目录下的文件（相对路径带目录）", files.includes("files/讲义封面.png"), files);
     check("跳过 JSONL 会话历史", !files.some((f) => f.endsWith(".jsonl")), files);
     check("跳过 .env 与 prod.env", !files.includes(".env") && !files.includes("prod.env"), files);
     check("跳过隐藏目录 .git", !files.some((f) => f.startsWith(".git")), files);
@@ -536,7 +540,7 @@ async function main(): Promise<void> {
       metaById,
       metaByName,
     });
-    check("getAttachment 只出相对路径", metaByName.relativePath === "attachments/讲义封面.png", metaByName);
+    check("getAttachment 只出相对路径", metaByName.relativePath === "files/讲义封面.png", metaByName);
 
     const image = readAttachmentImage(db, sessionId, encodeAttachmentId("讲义封面.png"));
     check("readAttachmentImage 返回 { data, mimeType }", image.mimeType === "image/png" && typeof image.data === "string", {
@@ -578,6 +582,38 @@ async function main(): Promise<void> {
       direct: directNames,
       http: httpNames,
     });
+
+    // ============ 9b. 注入文案与一次性迁移（ADR-0038） ============
+    console.log("\n[9b] 非图片注入文案与 attachments/ → files/ 迁移");
+    check("图片判定只认四种位图", isImageAttachment(metaByName) && !isImageAttachment(getAttachment(db, sessionId, "笔记.txt")));
+    check("大小格式化：B / KB / MB", formatAttachmentSize(512) === "512 B" && formatAttachmentSize(12 * 1024) === "12 KB"
+      && formatAttachmentSize(Math.round(1.5 * 1024 * 1024)) === "1.5 MB" && formatAttachmentSize(2 * 1024 * 1024) === "2 MB");
+    const noteMeta = getAttachment(db, sessionId, "笔记.txt");
+    const injected = describeNonImageAttachments([metaByName, noteMeta]);
+    check("注入文案只列非图片、含文件名 / 相对路径 / 大小", injected === `用户上传了文件「笔记.txt」，路径 files/笔记.txt（${formatAttachmentSize(noteMeta.size)}）。`, injected);
+    check("只有图片时注入文案为空", describeNonImageAttachments([metaByName]) === "");
+    // 迁移：旧目录改名、并存不动、无旧目录跳过；用 lstat 判断，符号链接的 attachments 不当目录
+    const legacyWorkPath = path.join(homeDir, "learn", "2", "pi", "5");
+    const legacySessionId = insertPiSession(db, legacyWorkPath);
+    mkdirSync(path.join(legacyWorkPath, "attachments"));
+    writeFileSync(path.join(legacyWorkPath, "attachments", "旧文件.txt"), "legacy", "utf8");
+    const bothWorkPath = path.join(homeDir, "learn", "2", "pi", "6");
+    insertPiSession(db, bothWorkPath);
+    mkdirSync(path.join(bothWorkPath, "attachments"));
+    mkdirSync(path.join(bothWorkPath, "files"));
+    const linkedLegacyWorkPath = path.join(homeDir, "learn", "2", "pi", "7");
+    insertPiSession(db, linkedLegacyWorkPath);
+    symlinkSync(outsideDir, path.join(linkedLegacyWorkPath, "attachments"));
+    const migration = renameLegacyAttachmentDirs(db);
+    check("迁移只改名一个、并存的记为 skipped", migration.renamed === 1 && migration.skipped === 1, migration);
+    check("旧目录已改名且文件随之移动", !(await fs.lstat(path.join(legacyWorkPath, "attachments")).then(() => true).catch(() => false))
+      && (await fs.readFile(path.join(legacyWorkPath, "files", "旧文件.txt"), "utf8")) === "legacy");
+    check("并存的两个目录都保持原样", (await fs.lstat(path.join(bothWorkPath, "attachments"))).isDirectory() && (await fs.lstat(path.join(bothWorkPath, "files"))).isDirectory());
+    check("符号链接的 attachments 不被当目录迁移", (await fs.lstat(path.join(linkedLegacyWorkPath, "attachments"))).isSymbolicLink()
+      && !(await fs.lstat(path.join(linkedLegacyWorkPath, "files")).then(() => true).catch(() => false)));
+    r = await request("GET", `/api/conversations/${legacySessionId}/attachments`);
+    check("迁移后的文件经列表可见且路径是 files/", r.status === 200 && r.json.attachments.some((a: any) => a.name === "旧文件.txt" && a.relativePath === "files/旧文件.txt"), r.json);
+    check("再跑一次迁移是幂等的", JSON.stringify(renameLegacyAttachmentDirs(db)) === JSON.stringify({ renamed: 0, skipped: 1 }));
 
     // ============ 10. 全局不变量：绝对路径永不出接口 ============
     console.log("\n[10] 全局不变量");

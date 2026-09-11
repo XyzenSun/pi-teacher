@@ -7,6 +7,7 @@ import { AgentsMdTab, TeachStyleTab } from "./PromptsTab.tsx";
 import { AccountTab } from "./AccountTab.tsx";
 import { ModelProvidersTab } from "./ModelProvidersTab.tsx";
 import { AdvancedTab } from "./AdvancedTab.tsx";
+import { UserPreferencesTab } from "./UserPreferencesTab.tsx";
 import { topicsApi } from "../api/client.ts";
 import type { Topic } from "../api/types.ts";
 import { Modal } from "../ui/Overlays.tsx";
@@ -18,6 +19,7 @@ const TABS = [
   { key: "topics", label: "Topic", icon: "label" },
   { key: "agents-md", label: "Agents Md", icon: "description" },
   { key: "teach-style", label: "Teach Style", icon: "palette" },
+  { key: "preferences", label: "用户偏好", icon: "manage_accounts" },
   { key: "account", label: "账号", icon: "person" },
   { key: "models", label: "模型与 Provider", icon: "hub" },
   { key: "advanced", label: "高级配置", icon: "tune" },
@@ -49,6 +51,7 @@ export function SettingsOverlay() {
       case "topics": return <TopicsTab topics={topics} onChanged={() => setTopicsVersion((version) => version + 1)} />;
       case "agents-md": return <AgentsMdTab />;
       case "teach-style": return <TeachStyleTab />;
+      case "preferences": return <UserPreferencesTab />;
       case "account": return <AccountTab />;
       case "models": return <ModelProvidersTab />;
       case "advanced": return <AdvancedTab />;

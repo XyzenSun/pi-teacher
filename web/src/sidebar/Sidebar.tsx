@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { workspacesApi } from "../api/client.ts";
+import { conversationsApi, workspacesApi } from "../api/client.ts";
 import type { Conversation, Space } from "../api/types.ts";
 import { useAuth } from "../auth/AuthContext.tsx";
 import { useWorkspace } from "../app/WorkspaceContext.tsx";
@@ -12,6 +12,8 @@ interface SidebarProps {
   activeConversationId: number | null;
   onOpenConversation: (id: number) => void;
   onCreate: (intent: CreateIntent) => void;
+  /** 删除的是当前打开的对话（或它所在的 Space）时，由外层把路由带回工作台首页。 */
+  onConversationDeleted: (id: number) => void;
 }
 
 /** 左下角 2×2 Dock：四个入口都指向真实页面，路径由当前工作台路由派生。 */
@@ -32,7 +34,7 @@ function formatTime(iso: string | null): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-export function Sidebar({ activeConversationId, onOpenConversation, onCreate }: SidebarProps) {
+export function Sidebar({ activeConversationId, onOpenConversation, onCreate, onConversationDeleted }: SidebarProps) {
   const { data, topics, error, refresh } = useWorkspace();
   const auth = useAuth();
   const navigate = useNavigate();
@@ -42,6 +44,7 @@ export function Sidebar({ activeConversationId, onOpenConversation, onCreate }: 
   const [spaceName, setSpaceName] = useState("");
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [removingSpace, setRemovingSpace] = useState<Space | null>(null);
+  const [removingConversation, setRemovingConversation] = useState<Conversation | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
@@ -75,6 +78,24 @@ export function Sidebar({ activeConversationId, onOpenConversation, onCreate }: 
       await workspacesApi.remove(space.id);
       setRemovingSpace(null);
       await refresh();
+      // 当前打开的对话随 Space 一起被删时，路由必须离开它，否则页面停在一个 404 的对话上。
+      const deletedActive = space.conversations.find((conversation) => conversation.id === activeConversationId);
+      if (deletedActive) onConversationDeleted(deletedActive.id);
+    } catch (cause) {
+      setRemoveError(cause instanceof Error ? cause.message : "删除失败");
+    } finally {
+      setRemoveBusy(false);
+    }
+  };
+
+  const deleteConversation = async (conversation: Conversation) => {
+    setRemoveBusy(true);
+    setRemoveError(null);
+    try {
+      await conversationsApi.remove(conversation.id);
+      setRemovingConversation(null);
+      await refresh();
+      if (conversation.id === activeConversationId) onConversationDeleted(conversation.id);
     } catch (cause) {
       setRemoveError(cause instanceof Error ? cause.message : "删除失败");
     } finally {
@@ -86,19 +107,31 @@ export function Sidebar({ activeConversationId, onOpenConversation, onCreate }: 
   const reviewSpace = visibleSpaces.find((space) => space.type === "review");
   const learnSpaces = visibleSpaces.filter((space) => space.type === "learn");
 
+  // 行是 div 而不是 button：删除图标本身是按钮，button 不能嵌套 button。
   const renderConversation = (conversation: Conversation) => {
     const active = conversation.id === activeConversationId;
     return (
-      <button
+      <div
         key={conversation.id}
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={() => onOpenConversation(conversation.id)}
-        className={`tree-row w-full pl-7 pr-2 group ${active ? "tree-row-active" : ""}`}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenConversation(conversation.id); } }}
+        className={`tree-row w-full pl-7 pr-2 group cursor-pointer ${active ? "tree-row-active" : ""}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-secondary" : "bg-outline-variant group-hover:bg-secondary"}`} />
         <span className={`flex-1 min-w-0 truncate ${active ? "font-medium" : ""}`}>{conversationTitle(conversation)}</span>
-        <span className="text-[10px] text-muted font-mono shrink-0">{formatTime(conversation.modifiedAt ?? conversation.createdAt)}</span>
-      </button>
+        <span className="text-[10px] text-muted font-mono shrink-0 group-hover:hidden">{formatTime(conversation.modifiedAt ?? conversation.createdAt)}</span>
+        <button
+          type="button"
+          className="icon text-[16px] text-muted hover:text-error p-0.5 shrink-0 hidden group-hover:inline-block"
+          title="删除对话"
+          aria-label={`删除对话 ${conversationTitle(conversation)}`}
+          onClick={(event) => { event.stopPropagation(); setRemoveError(null); setRemovingConversation(conversation); }}
+        >
+          delete
+        </button>
+      </div>
     );
   };
 
@@ -219,10 +252,22 @@ export function Sidebar({ activeConversationId, onOpenConversation, onCreate }: 
           danger
           busy={removeBusy}
           error={removeError}
-          message={<>删除「{removingSpace.name}」及其 {removingSpace.conversations.length} 条对话记录？对话的工作目录与消息文件会保留在磁盘上，但不再显示在这里。</>}
+          message={<>删除「{removingSpace.name}」及其 {removingSpace.conversations.length} 条对话？对话记录会被删除，各对话工作目录里的文件保留在磁盘上。</>}
           confirmLabel="删除"
           onCancel={() => { setRemovingSpace(null); setRemoveError(null); }}
           onConfirm={() => void deleteSpace(removingSpace)}
+        />
+      )}
+      {removingConversation && (
+        <ConfirmDialog
+          title="删除对话"
+          danger
+          busy={removeBusy}
+          error={removeError}
+          message={<>删除对话「{conversationTitle(removingConversation)}」？聊天记录会被删除，工作目录里的文件保留在磁盘上。</>}
+          confirmLabel="删除"
+          onCancel={() => { setRemovingConversation(null); setRemoveError(null); }}
+          onConfirm={() => void deleteConversation(removingConversation)}
         />
       )}
     </aside>

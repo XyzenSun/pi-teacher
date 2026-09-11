@@ -13,6 +13,8 @@
  *   5. 同一 Space 下两条 Pi Session 的 work_path / AGENTS.md / style.md / JSONL 互不干扰
  *   6. 类型与模板匹配、review_topic_id 归属校验（触发器 + 仓储层双保险）
  *   7. 制卡开关对学习与复习均为双值、助教恒 0；Teach Style 切换后字段与 style.md 同步（ADR-0031）
+ *   8. essence/ 仅学习默认创建，已有产出保留，普通文件冲突不覆盖（ADR-0039）
+ *   9. 旧 card 来源列幂等移除，卡片、调度、复习日志、自增序列与约束保留
  *
  * 跑法：npx tsx src/verify/schema-check.ts
  */
@@ -21,9 +23,10 @@ import { promises as fs, mkdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { initializeSchema } from "../db/schema.ts";
-import { createPiSession, getPiSession, sessionKeyFor } from "../session/repository.ts";
+import { createPiSession, ensureLearningEssenceDirectory, getPiSession, sessionKeyFor } from "../session/repository.ts";
 import { projectTeachStyle } from "../projection/agents-md.ts";
 import type { PiSessionRow } from "../db/types.ts";
+import { applyRatings, createInitialSchedule } from "../fsrs/service.ts";
 
 let passed = 0;
 let failed = 0;
@@ -83,7 +86,7 @@ async function main(): Promise<void> {
 
     const BUSINESS_TABLES = [
       "agents_md", "card", "card_schedule", "glossary", "pi_session",
-      "review_log", "space", "teach_style", "topic", "user",
+      "review_log", "setting", "space", "teach_style", "topic", "user", "user_env",
     ];
     const tableNames = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>)
       .map((row) => row.name)
@@ -94,6 +97,9 @@ async function main(): Promise<void> {
       tableNames,
     );
     check("旧 session 表已彻底移除", !tableNames.includes("session"), tableNames);
+    const cardColumnNames = ["id", "topic_id", "front", "back", "status", "reason_and_remark", "created_at"];
+    check("新库 card 字段不再含 source_essence_path", JSON.stringify((db.prepare("PRAGMA table_info(card)").all() as Array<{ name: string }>).map((column) => column.name))
+      === JSON.stringify(cardColumnNames));
 
     const spaces = db.prepare("SELECT id, type, name FROM space ORDER BY id").all() as Array<{ id: number; type: string; name: string }>;
     check(
@@ -114,8 +120,15 @@ async function main(): Promise<void> {
       taRow?.work_path,
     );
     check("助教目录已建 AGENTS.md", await exists(path.join(taRow!.work_path, "AGENTS.md")));
-    check("助教目录已建 style.md", await exists(path.join(taRow!.work_path, "style.md")));
-    check("助教目录已建 attachments/", await exists(path.join(taRow!.work_path, "attachments")));
+    check("助教目录没有 style.md（ADR-0035：助教无教学风格）", !(await exists(path.join(taRow!.work_path, "style.md"))));
+    check("助教目录已建 files/（ADR-0038）", await exists(path.join(taRow!.work_path, "files")));
+    check("助教默认不创建 essence/（ADR-0039）", !(await exists(path.join(taRow!.work_path, "essence"))));
+    // 旧数据目录里遗留的 style.md 是程序投影，初始化重入要把它删掉；用户文件（pi-session-user.md）不动。
+    await fs.writeFile(path.join(taRow!.work_path, "style.md"), "遗留风格\n");
+    await fs.writeFile(path.join(taRow!.work_path, "pi-session-user.md"), "用户自己的会话级要求\n");
+    initializeSchema(db, homeDir);
+    check("初始化重入删除助教遗留的 style.md", !(await exists(path.join(taRow!.work_path, "style.md"))));
+    check("初始化重入不动助教的 pi-session-user.md", (await fs.readFile(path.join(taRow!.work_path, "pi-session-user.md"), "utf8")) === "用户自己的会话级要求\n");
     const taJsonl = await fs.readFile(taRow!.path, "utf8");
     const taHeader = JSON.parse(taJsonl.trim().split("\n")[0]) as { type: string; id: string; cwd: string };
     check(
@@ -323,9 +336,29 @@ async function main(): Promise<void> {
         && path.resolve(redisHeader.cwd) === path.resolve(redisSession.work_path),
       { javaHeader, redisHeader },
     );
-    check("attachments/ 每条对话各自一份",
-      await exists(path.join(javaSession.work_path, "attachments")) && await exists(path.join(redisSession.work_path, "attachments")));
+    check("files/ 每条对话各自一份",
+      await exists(path.join(javaSession.work_path, "files")) && await exists(path.join(redisSession.work_path, "files")));
     check("制卡开关按对话独立存储", javaSession.enable_make_card === 1 && redisSession.enable_make_card === 0);
+    const javaEssencePath = path.join(javaSession.work_path, "essence");
+    const redisEssencePath = path.join(redisSession.work_path, "essence");
+    check("学习会话无论制卡开关都默认创建 essence/", (await fs.stat(javaEssencePath)).isDirectory() && (await fs.stat(redisEssencePath)).isDirectory());
+    check("新建 essence/ 只有空目录，没有程序生成的正文", (await fs.readdir(javaEssencePath)).length === 0 && (await fs.readdir(redisEssencePath)).length === 0);
+    const existingEssence = Buffer.from("# JVM 学习精华\r\n\r\n类加载过程的关键步骤。  \r\n", "utf8");
+    const existingEssencePath = path.join(javaEssencePath, "类加载.md");
+    await fs.writeFile(existingEssencePath, existingEssence, { flag: "wx", mode: 0o640 });
+    ensureLearningEssenceDirectory(javaSession.work_path, "learn");
+    ensureLearningEssenceDirectory(javaSession.work_path, "learn");
+    check("重复保证目录不改已有精华字节与权限", (await fs.readFile(existingEssencePath)).equals(existingEssence)
+      && ((await fs.stat(existingEssencePath)).mode & 0o777) === 0o640);
+    await fs.rmdir(redisEssencePath);
+    initializeSchema(db, homeDir);
+    check("初始化不全盘补建旧学习会话目录", !(await exists(redisEssencePath)));
+    await fs.writeFile(redisEssencePath, "用户已有的同名文件\n", { flag: "wx" });
+    checkRejected("essence 路径被文件占用时清晰报错", () => ensureLearningEssenceDirectory(redisSession.work_path, "learn"), "essence 路径被非目录占用");
+    check("同名文件冲突不覆盖用户文件", (await fs.readFile(redisEssencePath, "utf8")) === "用户已有的同名文件\n");
+    await fs.unlink(redisEssencePath);
+    ensureLearningEssenceDirectory(redisSession.work_path, "learn");
+    check("旧学习会话补建空 essence/，不代模型写内容", (await fs.stat(redisEssencePath)).isDirectory() && (await fs.readdir(redisEssencePath)).length === 0);
 
     // 一条对话往自己目录写私有文件，不出现在另一条对话目录里
     await fs.writeFile(path.join(javaSession.work_path, "MISSION.md"), "# 学 JVM", "utf8");
@@ -428,6 +461,8 @@ async function main(): Promise<void> {
     );
     const reviewSessionAgain = createPiSession(db, homeDir, { spaceId: 1, agentsMdId: reviewAgentsId });
     check("固定复习 Space 允许多条复习对话", reviewSessionAgain.id !== reviewSession.id);
+    check("复习会话默认不创建 essence/", !(await exists(path.join(reviewSession.work_path, "essence")))
+      && !(await exists(path.join(reviewSessionAgain.work_path, "essence"))));
     // 复习会话同样是制卡开关的合法宿主：复习中发现薄弱点要能补卡，
     // 只有助教才是恒定关闭。此前前端强制传 false，这里锁住双值语义。
     check("复习对话默认开启制卡", reviewSession.enable_make_card === 1, reviewSession.enable_make_card);
@@ -475,6 +510,68 @@ async function main(): Promise<void> {
     );
     const dbPiIds = (db.prepare("SELECT id FROM pi_session WHERE space_id = ? ORDER BY id").all(learnSpaceId) as Array<{ id: number }>).map((r) => r.id);
     check("数据库里该 Space 也只有这两条对话", JSON.stringify(dbPiIds) === JSON.stringify([javaSession.id, redisSession.id]), dbPiIds);
+
+    console.log("\n[7] 不创建不等于删除：助教与复习的已有精华保持原样");
+    for (const session of [getPiSession(db, taRow!.id), reviewSession, reviewNoCard]) {
+      const essencePath = path.join(session.work_path, "essence");
+      ensureLearningEssenceDirectory(session.work_path, session.space_type);
+      check(`${session.space_type} 会话 ${session.id} 不会被补建 essence/`, !(await exists(essencePath)));
+      await fs.mkdir(essencePath);
+      const keptPath = path.join(essencePath, "用户已有产出.md");
+      const keptContent = Buffer.from("# 用户已有产出\r\n不因会话类型而删除。\r\n", "utf8");
+      await fs.writeFile(keptPath, keptContent, { flag: "wx" });
+      ensureLearningEssenceDirectory(session.work_path, session.space_type);
+      initializeSchema(db, homeDir);
+      check(`${session.space_type} 会话 ${session.id} 的已有精华不删除不覆盖`, (await fs.readFile(keptPath)).equals(keptContent));
+    }
+
+    console.log("\n[8] 旧 card 来源列幂等迁移与真实调度 / 复习日志保留");
+    const migrationHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-card-migration-"));
+    roots.push(migrationHome);
+    const migrationDb = openTempDatabase(migrationHome);
+    databases.push(migrationDb);
+    initializeSchema(migrationDb, migrationHome);
+    const migrationSpaceId = createLearnSpace(migrationDb, "迁移验证学习空间");
+    const migrationAgentsId = (migrationDb.prepare("SELECT id FROM agents_md WHERE type = 'learn'").get() as { id: number }).id;
+    const migrationSession = createPiSession(migrationDb, migrationHome, { spaceId: migrationSpaceId, agentsMdId: migrationAgentsId });
+    const migrationEssencePath = path.join(migrationSession.work_path, "essence", "旧卡引用的精华.md");
+    const migrationEssence = Buffer.from("# 旧精华\n\n卡片解耦不删除精华文件。\n", "utf8");
+    await fs.writeFile(migrationEssencePath, migrationEssence, { flag: "wx", mode: 0o640 });
+    // 在真实 SQLite 的完整 schema 上恢复旧列，调度与日志则由生产 FSRS 服务生成。
+    migrationDb.exec("ALTER TABLE card ADD COLUMN source_essence_path TEXT");
+    const migrationTopicId = Number(migrationDb.prepare("INSERT INTO topic (name) VALUES ('迁移验证主题')").run().lastInsertRowid);
+    const insertLegacyCard = migrationDb.prepare(`INSERT INTO card (id, topic_id, front, back, status, reason_and_remark, source_essence_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    insertLegacyCard.run(101, migrationTopicId, "正常卡", "正常卡答案", "normal", "保留备注", migrationEssencePath);
+    insertLegacyCard.run(102, migrationTopicId, "待审批卡", "待审批卡答案", "proposed", null, null);
+    insertLegacyCard.run(103, migrationTopicId, "回收站卡", "回收站卡答案", "normal", "旧卡备注", migrationEssencePath);
+    for (const cardId of [101, 103]) createInitialSchedule(migrationDb, cardId, 0.9, 365);
+    applyRatings(migrationDb, [{ card_id: 101, rating: "Good" }, { card_id: 103, rating: "Hard" }]);
+    migrationDb.prepare("UPDATE card SET status = 'deleted' WHERE id = 103").run();
+    const readMigrationData = () => ({
+      cards: migrationDb.prepare(`SELECT ${cardColumnNames.join(", ")} FROM card ORDER BY id`).all(),
+      schedules: migrationDb.prepare("SELECT * FROM card_schedule ORDER BY card_id").all(),
+      logs: migrationDb.prepare("SELECT * FROM review_log ORDER BY id").all(),
+      sequences: migrationDb.prepare("SELECT name, seq FROM sqlite_sequence WHERE name IN ('card', 'review_log') ORDER BY name").all(),
+    });
+    const beforeMigration = readMigrationData();
+    check("旧库含有真实卡片、调度、复习日志和非空来源列", beforeMigration.cards.length === 3
+      && beforeMigration.schedules.length === 2 && beforeMigration.logs.length === 2
+      && (migrationDb.prepare("SELECT COUNT(*) AS n FROM card WHERE source_essence_path IS NOT NULL").get() as { n: number }).n === 2);
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      initializeSchema(migrationDb, migrationHome);
+      const migratedColumns = (migrationDb.prepare("PRAGMA table_info(card)").all() as Array<{ name: string }>).map((column) => column.name);
+      check(`第 ${attempt} 次初始化：来源列移除且其余字段保留`, JSON.stringify(migratedColumns) === JSON.stringify(cardColumnNames));
+      check(`第 ${attempt} 次初始化：卡片 / 调度 / 复习日志 / 自增高水位完全不变`, JSON.stringify(readMigrationData()) === JSON.stringify(beforeMigration));
+    }
+    check("删列不修改精华文件的字节与权限", (await fs.readFile(migrationEssencePath)).equals(migrationEssence)
+      && ((await fs.stat(migrationEssencePath)).mode & 0o777) === 0o640);
+    check("迁移后外键完整性检查通过", (migrationDb.pragma("foreign_key_check") as unknown[]).length === 0);
+    check("迁移后卡片主题索引仍在", !!migrationDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_card_topic_status'").get());
+    checkRejected("迁移后卡片状态 CHECK 仍生效", () => migrationDb.prepare("UPDATE card SET status = 'invalid' WHERE id = 101").run(), "CHECK constraint failed");
+    checkRejected("迁移后卡片 Topic 外键仍生效", () => migrationDb.prepare("UPDATE card SET topic_id = 999999 WHERE id = 101").run(), "FOREIGN KEY constraint failed");
+    const nextCardId = Number(migrationDb.prepare("INSERT INTO card (topic_id, front, back) VALUES (?, '迁移后新卡', '新答案')").run(migrationTopicId).lastInsertRowid);
+    check("迁移后新卡继续使用原自增序列", nextCardId === 104);
 
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
   } finally {

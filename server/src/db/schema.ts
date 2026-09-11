@@ -106,7 +106,6 @@ CREATE TABLE IF NOT EXISTS card (
   back                TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'proposed',
   reason_and_remark   TEXT,
-  source_essence_path TEXT,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
 
   CHECK (status IN ('proposed', 'normal', 'deleted'))
@@ -152,6 +151,20 @@ CREATE TABLE IF NOT EXISTS glossary (
   CHECK (status IN ('proposed', 'normal', 'deleted'))
 );
 
+-- 用户环境变量（ADR-0034）：启动与保存时注入后端 process.env，供模型调用的 skill 子进程继承。
+-- 明文存储、明文回显：单用户本机部署，库本身不加密，不再区分隐藏值。
+CREATE TABLE IF NOT EXISTS user_env (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- pi-teacher 自己的业务运行设置（ADR-0036 / ADR-0039），与 Pi 的 settings.json 无关。
+-- 存维护提醒共用间隔与文案；缺行即取代码默认值，不需要 seed。
+CREATE TABLE IF NOT EXISTS setting (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_card_schedule_due
   ON card_schedule (due);
 
@@ -160,8 +173,8 @@ CREATE INDEX IF NOT EXISTS idx_card_topic_status
 `;
 
 /**
- * 新 Schema 不迁移、不兼容旧 session 模型。旧部署必须显式重建数据，不能在
- * 普通启动中悄悄丢弃文件；验证总是使用真实临时数据库。user 表保持空表直到 setup。
+ * ADR-0030 不兼容更早的 session 表模型，仍要求显式重建；当前 schema 的独立字段
+ * 变更在建表后幂等迁移，不重建卡片或删除文件。user 表保持空表直到 setup。
  */
 export function initializeSchema(db: Database.Database, homeDir: string): void {
   if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'").get()) {
@@ -169,6 +182,23 @@ export function initializeSchema(db: Database.Database, homeDir: string): void {
   }
   db.pragma("foreign_keys = ON");
   db.exec(CREATE_TABLES);
+  dropUserEnvSecretColumn(db);
+  dropCardSourceEssencePath(db);
   seedApplication(db, homeDir);
+}
+
+/**
+ * user_env 曾短暂带过 secret 列（隐藏值），在正式发布前取消。已建过表的数据目录
+ * 靠这条幂等迁移去掉该列，行数据不动；CREATE TABLE IF NOT EXISTS 对已有表不生效。
+ */
+function dropUserEnvSecretColumn(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(user_env)").all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === "secret")) db.exec("ALTER TABLE user_env DROP COLUMN secret");
+}
+
+/** 卡片与精华解耦（ADR-0039）：仅删旧来源列，卡片、调度、复习日志及精华文件都保留。 */
+function dropCardSourceEssencePath(db: Database.Database): void {
+  const columns = db.prepare("PRAGMA table_info(card)").all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === "source_essence_path")) db.exec("ALTER TABLE card DROP COLUMN source_essence_path");
 }
 

@@ -11,10 +11,12 @@
  *   4. 原子写：校验失败时原文件字节与权限都不变
  *   5. 高级字段保留：结构化编辑不会抹掉 compat / cost 等手写配置
  *   6. 注释与尾逗号容忍：能读带 `//` 注释的 models.json
+ *   7. 全局目录布局幂等补建；USER.md + style.md 注入段落四态；user-preferences 校验与原子写
+ *   8. 用户环境变量：env / .env 首次导入优先级、三态补丁、受保护变量名、process.env 同步、出口不含隐藏值
  *
  * 跑法：npm run verify:config
  */
-import { promises as fs, readFileSync, statSync } from "node:fs";
+import { promises as fs, existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -30,6 +32,13 @@ const {
   providerJsonView, providerPatchFromJson, saveProvider, deleteProvider, assertProviderId,
 } = await import("../config/pi-config.ts");
 const { HttpError } = await import("../routes/http.ts");
+const { ensureGlobalLayout } = await import("../db/seed.ts");
+const { GLOBAL_AGENTS_MD, MATERIALS_INDEX_PLACEHOLDER, USER_PREFERENCES_PLACEHOLDER } = await import("../prompts/defaults.ts");
+const { buildAppendedSystemPrompt } = await import("../projection/system-prompt-builder.ts");
+const { readHomeMarkdownContent, writeHomeMarkdown, readHomeMarkdown } = await import("../config/home-markdown.ts");
+const { bootstrapUserEnv, listUserEnv, readUserEnvPatch, applyUserEnvPatch, deleteUserEnv } = await import("../config/user-env.ts");
+const { initializeSchema } = await import("../db/schema.ts");
+const { default: Database } = await import("better-sqlite3");
 
 let passed = 0;
 let failed = 0;
@@ -197,6 +206,144 @@ async function main(): Promise<void> {
   check("环境变量固定时来源为 env 且不可编辑", envDefault.source === "env" && envDefault.editable === false, envDefault);
   delete process.env.PI_TEACHER_PROVIDER;
   delete process.env.PI_TEACHER_MODEL;
+
+  console.log("\n[7] 全局布局与偏好注入四态");
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-home-"));
+  const workPath = path.join(homeDir, "learn", "1", "pi", "1");
+  await fs.mkdir(workPath, { recursive: true });
+  try {
+    ensureGlobalLayout(homeDir);
+    for (const relative of ["AGENTS.md", "USER.md", "materials/index.md", "materials/origins", "assets", "llm-text-to-img"]) {
+      check(`补建 ${relative}`, statSync(path.join(homeDir, relative)) !== undefined);
+    }
+    check("USER.md 初始为占位注释", readFileSync(path.join(homeDir, "USER.md"), "utf8") === USER_PREFERENCES_PLACEHOLDER);
+    const seededAgentsMd = readFileSync(path.join(homeDir, "AGENTS.md"), "utf8");
+    check("新全局 AGENTS.md 使用唯一出厂常量", seededAgentsMd === GLOBAL_AGENTS_MD);
+    check("出厂规则明确 files 输入、质量判断、规整直归档与原件整理分流", seededAgentsMd.includes("先实际阅读")
+      && seededAgentsMd.includes("正确且可学习") && seededAgentsMd.includes("内容与排版规整")
+      && seededAgentsMd.includes("files/") && seededAgentsMd.includes("materials/origins/") && seededAgentsMd.includes("materials/index.md"));
+    check("出厂规则明确模型归档责任与学习专属精华", seededAgentsMd.includes("程序不会代办")
+      && seededAgentsMd.includes("只有学习会话默认提供空的") && seededAgentsMd.includes("独立于卡片"));
+    check("资料索引只初始化占位内容，不代模型写资料", readFileSync(path.join(homeDir, "materials", "index.md"), "utf8") === MATERIALS_INDEX_PLACEHOLDER);
+    const customGlobalRules = Buffer.from("# 用户改过的全局规则\r\n\r\n- 保留排版与尾随空格  \r\n", "utf8");
+    await fs.writeFile(path.join(homeDir, "AGENTS.md"), customGlobalRules);
+    await fs.chmod(path.join(homeDir, "AGENTS.md"), 0o640);
+    await fs.writeFile(path.join(homeDir, "materials", "index.md"), "# 用户整理过的资料索引\n");
+    ensureGlobalLayout(homeDir);
+    ensureGlobalLayout(homeDir);
+    check("重复补建不覆盖已有 AGENTS.md 的字节与权限", readFileSync(path.join(homeDir, "AGENTS.md")).equals(customGlobalRules)
+      && (statSync(path.join(homeDir, "AGENTS.md")).mode & 0o777) === 0o640);
+    check("重复补建不覆盖已有资料索引", readFileSync(path.join(homeDir, "materials", "index.md"), "utf8") === "# 用户整理过的资料索引\n");
+
+    // ADR-0036：会话级引导块无条件输出——两层都空时也要告诉模型 pi-session-user.md 是什么，
+    // 否则维护提醒里的「更新到 pi-session-user.md」无从落地。
+    const bareGuidance = buildAppendedSystemPrompt(homeDir, workPath);
+    check("占位 USER.md + 无 style.md → 只有会话级引导块", bareGuidance.startsWith("<会话级用户偏好>") && !bareGuidance.includes("<全局用户偏好>") && !bareGuidance.includes("<教学风格>") && !bareGuidance.includes("以下为用户偏好与教学风格"));
+    await fs.writeFile(path.join(workPath, "style.md"), "   \n");
+    check("空白 style.md 视为空", buildAppendedSystemPrompt(homeDir, workPath) === bareGuidance);
+    await fs.writeFile(path.join(workPath, "style.md"), "先给结论再解释。\n");
+    const styleOnly = buildAppendedSystemPrompt(homeDir, workPath);
+    check("仅风格：有风格块与会话级引导，无全局块", styleOnly.includes("<教学风格>\n先给结论再解释。\n</教学风格>")
+      && styleOnly.includes("<会话级用户偏好>") && styleOnly.includes("pi-session-user.md") && !styleOnly.includes("<全局用户偏好>"));
+    check("不传 homeDir 时退化为只读 style.md", buildAppendedSystemPrompt(undefined, workPath) === styleOnly);
+    await fs.writeFile(path.join(homeDir, "USER.md"), "- 多给代码示例\n");
+    const both = buildAppendedSystemPrompt(homeDir, workPath);
+    check("偏好+风格：三块齐全且顺序为全局→风格→会话级", both.indexOf("<全局用户偏好>\n- 多给代码示例\n</全局用户偏好>") > 0
+      && both.indexOf("<全局用户偏好>") < both.indexOf("<教学风格>") && both.indexOf("<教学风格>") < both.indexOf("<会话级用户偏好>"));
+    check("段落以固定引导句开头", both.startsWith("以下为用户偏好与教学风格，会话级内容优先于全局内容。"));
+    await fs.writeFile(path.join(workPath, "style.md"), "");
+    const preferencesOnly = buildAppendedSystemPrompt(homeDir, workPath);
+    check("仅偏好：无风格块，仍有会话级引导", preferencesOnly.includes("<全局用户偏好>") && !preferencesOnly.includes("<教学风格>") && preferencesOnly.includes("<会话级用户偏好>"));
+    check("程序不读会话级偏好文件", !existsSync(path.join(workPath, "pi-session-user.md")) && preferencesOnly.includes("pi-session-user.md"));
+
+    await rejects("user-preferences 拒绝多余键", () => readHomeMarkdownContent({ content: "x", other: 1 }, "user-preferences"), "只接收 content");
+    await rejects("user-preferences 拒绝非文本", () => readHomeMarkdownContent({ content: 1 }, "user-preferences"), "必须是文本");
+    await rejects("user-preferences 超长被拒", () => readHomeMarkdownContent({ content: "偏".repeat(8001) }, "user-preferences"), "8000");
+    check("global-agents-md 上限更宽", readHomeMarkdownContent({ content: "规".repeat(8001) }, "global-agents-md").length === 8001);
+    await rejects("global-agents-md 超过 20000 被拒", () => readHomeMarkdownContent({ content: "规".repeat(20001) }, "global-agents-md"), "20000");
+    const userMdBefore = readFileSync(path.join(homeDir, "USER.md"), "utf8");
+    await fs.chmod(path.join(homeDir, "USER.md"), 0o600);
+    writeHomeMarkdown(homeDir, "user-preferences", "- 术语保留英文\n");
+    check("原子写入生效且沿用原文件权限", readHomeMarkdown(homeDir, "user-preferences").content === "- 术语保留英文\n" && (statSync(path.join(homeDir, "USER.md")).mode & 0o777) === 0o600);
+    check("写入后无临时残留", !(await fs.readdir(homeDir)).some((name) => name.endsWith(".tmp")));
+    check("读取只回相对文件名", readHomeMarkdown(homeDir, "user-preferences").path === "USER.md" && !JSON.stringify(readHomeMarkdown(homeDir, "user-preferences")).includes(homeDir));
+    writeHomeMarkdown(homeDir, "global-agents-md", "# 改过的全局规则\n");
+    check("全局 AGENTS.md 走同一套原子写", readHomeMarkdown(homeDir, "global-agents-md").content === "# 改过的全局规则\n" && readHomeMarkdown(homeDir, "global-agents-md").path === "AGENTS.md");
+    check("之前的内容确实被替换", userMdBefore !== readHomeMarkdown(homeDir, "user-preferences").content);
+  } finally {
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
+
+  console.log("\n[8] 用户环境变量（ADR-0034）");
+  // 独立 key 名，避免与真实部署的 TAVILY_* 环境变量互相干扰；结束时全部清理。
+  const envHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-userenv-"));
+  const envDb = new Database(path.join(envHome, "user-env.db"));
+  const ENV_VALUE = `tvly-verify-${Math.random().toString(36).slice(2)}`;
+  const DOTENV_VALUE = `dotenv-verify-${Math.random().toString(36).slice(2)}`;
+  const savedTavily = { key: process.env.TAVILY_API_KEY, base: process.env.TAVILY_BASE_URL, timeout: process.env.TAVILY_TIMEOUT };
+  try {
+    // 旧数据目录里带 secret 列的表必须被幂等迁移掉，行数据保留。
+    envDb.exec("CREATE TABLE user_env (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL DEFAULT 1)");
+    envDb.prepare("INSERT INTO user_env (key, value, secret) VALUES ('LEGACY_ROW', 'kept', 1)").run();
+    initializeSchema(envDb, envHome);
+    initializeSchema(envDb, envHome);
+    const userEnvColumns = (envDb.prepare("PRAGMA table_info(user_env)").all() as Array<{ name: string }>).map((column) => column.name);
+    check("旧表的 secret 列被幂等迁移掉", JSON.stringify(userEnvColumns) === JSON.stringify(["key", "value"]), userEnvColumns);
+    check("迁移保留已有行", (envDb.prepare("SELECT value FROM user_env WHERE key = 'LEGACY_ROW'").get() as { value: string })?.value === "kept");
+    envDb.prepare("DELETE FROM user_env WHERE key = 'LEGACY_ROW'").run();
+
+    delete process.env.TAVILY_BASE_URL;
+    delete process.env.TAVILY_TIMEOUT;
+    process.env.TAVILY_API_KEY = ENV_VALUE;
+    await fs.writeFile(path.join(envHome, ".env"), `TAVILY_API_KEY=stale-dotenv-value\nTAVILY_BASE_URL=https://dotenv.example.invalid\nMY_SKILL_TOKEN=${DOTENV_VALUE}\nPATH=/evil\nlowercase=x\n`);
+    const dotenvBefore = readFileSync(path.join(envHome, ".env"), "utf8");
+    const first = bootstrapUserEnv(envDb, envHome);
+    check("内置项从环境变量首次导入", first.fromEnv.includes("TAVILY_API_KEY"), first);
+    check(".env 只导入表里没有的 key，且跳过受保护与非法名", JSON.stringify([...first.fromDotenv].sort()) === JSON.stringify(["MY_SKILL_TOKEN", "TAVILY_BASE_URL"]), first);
+    check("env 优先于 .env：同名 key 保留 env 的值", process.env.TAVILY_API_KEY === ENV_VALUE);
+    check(".env 文件字节不变", readFileSync(path.join(envHome, ".env"), "utf8") === dotenvBefore);
+    check("引导后 process.env 含 .env 导入的自定义项", process.env.MY_SKILL_TOKEN === DOTENV_VALUE && process.env.TAVILY_BASE_URL === "https://dotenv.example.invalid");
+    process.env.TAVILY_API_KEY = "changed-in-container-env";
+    const second = bootstrapUserEnv(envDb, envHome);
+    check("再次启动不重复导入", second.fromEnv.length === 0 && second.fromDotenv.length === 0, second);
+    check("表为准：容器 env 后来的改动不覆盖表", process.env.TAVILY_API_KEY === ENV_VALUE);
+
+    const listed = listUserEnv(envDb);
+    check("已设置的内置项明文回显", listed.find((item) => item.key === "TAVILY_API_KEY")?.value === ENV_VALUE && listed.find((item) => item.key === "TAVILY_API_KEY")?.configured === true);
+    check("内置未设置项仍在列且 configured=false、无 value", listed.find((item) => item.key === "TAVILY_TIMEOUT")?.configured === false
+      && listed.find((item) => item.key === "TAVILY_TIMEOUT")?.builtin === true && !("value" in listed.find((item) => item.key === "TAVILY_TIMEOUT")!));
+    check(".env 导入的自定义项标记为用户项且回显值", listed.find((item) => item.key === "MY_SKILL_TOKEN")?.builtin === false && listed.find((item) => item.key === "MY_SKILL_TOKEN")?.value === DOTENV_VALUE);
+    check("列表按内置项在前、用户项按名排序", listed.map((item) => item.key).join(",") === "TAVILY_API_KEY,TAVILY_BASE_URL,TAVILY_TIMEOUT,MY_SKILL_TOKEN");
+
+    await rejects("受保护变量 PATH 被拒", () => readUserEnvPatch({ PATH: "/x" }), "部署环境管理");
+    await rejects("受保护前缀 PI_TEACHER_ 被拒", () => readUserEnvPatch({ PI_TEACHER_HOME: "/x" }), "部署环境管理");
+    await rejects("NODE_OPTIONS 被拒", () => readUserEnvPatch({ NODE_OPTIONS: "--x" }), "部署环境管理");
+    await rejects("小写变量名被拒", () => readUserEnvPatch({ lowercase: "x" }), "无效");
+    await rejects("数字开头被拒", () => readUserEnvPatch({ "1ABC": "x" }), "无效");
+    await rejects("空串值被拒", () => readUserEnvPatch({ TAVILY_TIMEOUT: "" }), "不能为空");
+    await rejects("纯空白值被拒", () => readUserEnvPatch({ TAVILY_TIMEOUT: "   " }), "不能为空");
+    await rejects("非文本值被拒", () => readUserEnvPatch({ TAVILY_TIMEOUT: { value: "30s" } }), "必须是文本");
+    await rejects("超长值被拒", () => readUserEnvPatch({ TAVILY_TIMEOUT: "x".repeat(4001) }), "上限");
+    await rejects("空补丁被拒", () => readUserEnvPatch({}), "至少");
+
+    applyUserEnvPatch(envDb, readUserEnvPatch({ TAVILY_TIMEOUT: "30s", NEW_PLAIN: "plain", TAVILY_API_KEY: "rotated-value" }));
+    check("保存后 process.env 立即反映新值", process.env.TAVILY_TIMEOUT === "30s" && process.env.NEW_PLAIN === "plain" && process.env.TAVILY_API_KEY === "rotated-value");
+    check("覆盖写回表且列表回显", listUserEnv(envDb).find((item) => item.key === "TAVILY_API_KEY")?.value === "rotated-value"
+      && listUserEnv(envDb).find((item) => item.key === "NEW_PLAIN")?.value === "plain");
+    deleteUserEnv(envDb, "NEW_PLAIN");
+    check("删除用户项后从列表与 process.env 移除", !listUserEnv(envDb).some((item) => item.key === "NEW_PLAIN") && process.env.NEW_PLAIN === undefined);
+    deleteUserEnv(envDb, "TAVILY_API_KEY");
+    check("清除内置项后仍在列但 configured=false，且 process.env 移除", listUserEnv(envDb).find((item) => item.key === "TAVILY_API_KEY")?.configured === false && process.env.TAVILY_API_KEY === undefined);
+    await rejects("删除不存在的用户项 404", () => deleteUserEnv(envDb, "NOT_THERE"), "不存在");
+    await rejects("删除受保护名被拒", () => deleteUserEnv(envDb, "PATH"), "部署环境管理");
+  } finally {
+    envDb.close();
+    await fs.rm(envHome, { recursive: true, force: true });
+    for (const key of ["MY_SKILL_TOKEN", "NEW_PLAIN"]) delete process.env[key];
+    for (const [key, value] of [["TAVILY_API_KEY", savedTavily.key], ["TAVILY_BASE_URL", savedTavily.base], ["TAVILY_TIMEOUT", savedTavily.timeout]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 
   console.log("\n[6] 隔离性");
   check("被测路径位于临时 agent 目录内", path.resolve(filePath).startsWith(path.resolve(agentDir)), path.dirname(filePath));

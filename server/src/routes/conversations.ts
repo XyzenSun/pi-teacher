@@ -1,16 +1,18 @@
 import { Router } from "express";
 import type { Response } from "express";
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import type { AppState } from "./app-state.ts";
 import { HttpError, readBody, readId, readText } from "./http.ts";
-import { createPiSession, getPiSession, getSpace, sessionKeyFor } from "../session/repository.ts";
+import { createEmptySessionFile, createPiSession, deletePiSession, ensureLearningEssenceDirectory, getPiSession, getSpace, sessionKeyFor } from "../session/repository.ts";
 import { startWorkspaceSession, getSessionWrapper, type AgentSessionWrapper } from "../bridge/agent-session-wrapper.ts";
 import { createAgentEventStream } from "../bridge/agent-event-stream.ts";
 import { listConversations, readSessionEntries, buildSessionContext, conversationView } from "../session/session-reader.ts";
-import { getAttachment, readAttachmentImage } from "../session/attachments.ts";
+import { describeNonImageAttachments, getAttachment, isImageAttachment, readAttachmentImage } from "../session/attachments.ts";
 import { generateSessionTitle } from "../session/title-generator.ts";
-import { toolContextFor } from "../tools/context.ts";
+import { isMakeCardEnabled, toolContextFor } from "../tools/context.ts";
 import { projectTeachStyle } from "../projection/agents-md.ts";
+import { buildMaintenanceReminder, countUserTurns, shouldRemind } from "../projection/maintenance-reminder.ts";
+import { readAppSettings } from "../config/app-settings.ts";
 import { onAgentRunComplete } from "../events/hub.ts";
 import { clientView } from "../projection/client-view.ts";
 import type { PiSessionRow } from "../db/types.ts";
@@ -46,9 +48,21 @@ async function entriesFor(row: PiSessionRow): Promise<SessionEntry[]> {
     : readSessionEntries(row.path);
 }
 
+/** 关闭前先打断正在进行的回复：shutdown 会等待运行结束，不 abort 就可能卡到模型说完。 */
+async function abortAndShutdown(row: PiSessionRow): Promise<void> {
+  const wrapper = getSessionWrapper(sessionKeyFor(row.id));
+  if (wrapper?.isRunning()) await wrapper.send({ type: "abort" });
+  await wrapper?.shutdown();
+}
+
 async function openConversation(state: AppState, row: PiSessionRow): Promise<void> {
   if (!existsSync(row.path)) throw new HttpError(409, "Pi Session 的历史文件缺失，不能自动创建替代会话");
-  await startWorkspaceSession(sessionKeyFor(row.id), row.work_path, toolContextFor(state.db, row), { sessionFile: row.path });
+  // 旧学习会话随正常打开补齐精华目录，不启动全盘扫描，也不改动已有精华。
+  ensureLearningEssenceDirectory(row.work_path, row.space_type);
+  // 固定助教常驻（ADR-0035）：首次访问时打开，之后不参与空闲回收；学习 / 复习会话维持回收策略。
+  await startWorkspaceSession(sessionKeyFor(row.id), row.work_path, toolContextFor(state.db, row), {
+    sessionFile: row.path, homeDir: state.homeDir, resident: row.space_type === "ta",
+  });
 }
 
 async function mainSessionSummary(state: AppState, id: number): Promise<string> {
@@ -224,9 +238,20 @@ export function createConversationsRouter(state: AppState): Router {
       if (!message && !attachments.length) throw new HttpError(400, "消息与附件不能同时为空");
       if (message.length > 100_000) throw new HttpError(400, "单条输入最多 100,000 个字符");
       command.type = "prompt";
-      command.message = `${message}${attachments.length ? `\n\n本轮附件：\n${attachments.map((file) => `- ${file.relativePath}`).join("\n")}` : ""}`;
-      command.images = attachments.filter((file) => /^image\/(png|jpeg|gif|webp)$/.test(file.mimeType))
-        .map((file) => ({ type: "image", ...readAttachmentImage(state.db, row.id, file.id) }));
+      // 会话文件（ADR-0038）：图片作为图片块随消息发送；其余文件只在文本里告诉模型路径与大小。
+      const images = attachments.filter(isImageAttachment);
+      const filesNote = describeNonImageAttachments(attachments);
+      // 用户只发图片不写字时文本块会是空串，anthropic-messages 会丢弃空 text block，兜底一句说明。
+      const text = message || filesNote ? message : `用户发送了 ${images.length} 张图片。`;
+      // 维护提醒（ADR-0036 / ADR-0039）：轮次 = 活动分支上已有 user 消息数 + 1，命中后组合基础
+      // 文案与学习专属精华段；共用一个间隔，制卡开关从数据库现读，避免闭包快照得到假开关。
+      const turn = countUserTurns(wrapper.inner.sessionManager.getBranch() as unknown as SessionEntry[]) + 1;
+      const { reminderIntervalTurns, reminderTexts } = readAppSettings(state.db);
+      const reminder = shouldRemind(turn, reminderIntervalTurns)
+        ? buildMaintenanceReminder(row.space_type, isMakeCardEnabled(state.db, row.id), reminderTexts)
+        : "";
+      command.message = [text, filesNote, reminder].filter(Boolean).join("\n\n");
+      command.images = images.map((file) => ({ type: "image", ...readAttachmentImage(state.db, row.id, file.id) }));
       const behavior = type === "steer" ? "steer" : type === "follow_up" ? "followUp" : body.streamingBehavior;
       if (behavior !== undefined && behavior !== "steer" && behavior !== "followUp") throw new HttpError(400, "streamingBehavior 必须是 steer 或 followUp");
       if (behavior) command.streamingBehavior = behavior;
@@ -270,10 +295,42 @@ export function createConversationsRouter(state: AppState): Router {
 
   router.post("/:id/close", async (req, res) => {
     const row = getPiSession(state.db, readId(req.params.id));
-    const wrapper = getSessionWrapper(sessionKeyFor(row.id));
-    if (wrapper?.isRunning()) await wrapper.send({ type: "abort" });
-    await wrapper?.shutdown();
+    if (row.space_type === "ta") throw new HttpError(400, "助教常驻，不能关闭；要清空对话请用清除");
+    await abortAndShutdown(row);
     res.json({ success: true });
+  });
+
+  /**
+   * 真删除（ADR-0037）：行与 JSONL 一起删，工作目录保留（用户产出与上传文件）。
+   * 运行中的回复先 abort 再 shutdown，用户已在界面确认过，不再用 409 挡。
+   */
+  router.delete("/:id", async (req, res) => {
+    const row = getPiSession(state.db, readId(req.params.id));
+    if (row.space_type === "ta") throw new HttpError(403, "助教不可删除，请用清除");
+    await abortAndShutdown(row);
+    deletePiSession(state.db, row);
+    res.json({ success: true, filesRetained: true });
+  });
+
+  /**
+   * 助教清除对话（ADR-0035）：换一个只含 header 的新 JSONL，然后按同一稳定 ID 重开为常驻会话。
+   * 工作目录、pi-session-user.md 与上传的文件一律不动；旧 JSONL 删除失败只记日志——
+   * 孤儿历史文件与保留的工作目录同类，不值得为它回滚已经切换的路径。
+   */
+  router.post("/:id/clear", async (req, res) => {
+    const row = getPiSession(state.db, readId(req.params.id));
+    if (row.space_type !== "ta") throw new HttpError(403, "只有助教可以清除对话；学习 / 复习会话请直接删除");
+    await abortAndShutdown(row);
+    const newPath = createEmptySessionFile(row.work_path, row.id);
+    state.db.prepare("UPDATE pi_session SET path = ? WHERE id = ?").run(newPath, row.id);
+    try {
+      unlinkSync(row.path);
+    } catch (error) {
+      console.error(`[conversations] 助教旧历史文件删除失败，已切换到新文件：${error instanceof Error ? error.message : String(error)}`);
+    }
+    const updated = getPiSession(state.db, row.id);
+    await openConversation(state, updated);
+    res.json({ success: true, conversation: conversationView(updated), runtime: runtimeView(updated) });
   });
   return router;
 }

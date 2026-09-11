@@ -4,19 +4,19 @@
  * attachmentIds / name 还原成真实图片内容也复用本模块——「能下载的」与「能喂给
  * 模型的」永远走同一套校验，不可能出现两套口径。
  *
- * 存放位置：当前 Pi Session 的 `work_path/attachments/`（open-questions.md 已确认）。
- * 这里不建任何数据库表——附件的唯一事实来源是磁盘：模型自己在 attachments/ 下写出
- * 的图片也必须能被列出、下载、引用，所以列表一律 readdir 现算，绝不返回数据库里
- * 登记过、磁盘上已不存在的「假文件」。
+ * 存放位置：当前 Pi Session 的 `work_path/files/`（Session Files，ADR-0038；HTTP 路由与
+ * 本模块名保留 attachments——那是「上传」这个动作的名字）。这里不建任何数据库表——附件的
+ * 唯一事实来源是磁盘：模型自己在 files/ 下写出的图片也必须能被列出、下载、引用，所以
+ * 列表一律 readdir 现算，绝不返回数据库里登记过、磁盘上已不存在的「假文件」。
  *
  * 安全边界（移植 pi-web v0.8.11 lib/file-upload.ts + path-security.ts 的思路，
  * 见 docs/pi-web-研究/04-API与基础设施.md §2.4）：
  *   1. 文件名必须是纯 basename：拒 `.`/`..`/`/`/`\`/控制字符/隐藏名/超长名；
- *   2. 目录侧双段校验：lstat 拒绝 attachments 自身是符号链接（否则一个链接就能把
+ *   2. 目录侧双段校验：lstat 拒绝 files 目录自身是符号链接（否则一个链接就能把
  *      上传写到工作目录外），再对 realpath 做词法包含判定；
  *   3. 文件侧读用 O_NOFOLLOW、写用 `wx`（O_CREAT|O_EXCL）：符号链接既读不出去，
  *      也不会被顺着覆盖；同名冲突一律 409，不静默覆盖用户已有附件；
- *   4. 对外只出现相对路径（`attachments/<name>`）：绝对路径与工作目录既不进成功
+ *   4. 对外只出现相对路径（`files/<name>`）：绝对路径与工作目录既不进成功
  *      响应，也不进错误消息（db/types.ts 对 work_path 的约定）。
  *
  * 刻意**不**做 AI 文件沙箱——沙箱是部署层的事（ADR-0015 Docker）。本模块防的是
@@ -32,6 +32,7 @@ import {
   readdirSync,
   readSync,
   realpathSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -39,10 +40,10 @@ import type Database from "better-sqlite3";
 import type { PiSessionRow } from "../db/types.ts";
 import { HttpError } from "../routes/http.ts";
 import { isPathWithinRoots } from "../security/path-security.ts";
-import { getPiSession } from "./repository.ts";
+import { getPiSession, SESSION_FILES_DIR_NAME } from "./repository.ts";
 
-/** 附件目录名（相对 work_path），与 createPiSession 建的目录一致。 */
-export const ATTACHMENTS_DIR_NAME = "attachments";
+/** 改名前的目录名（ADR-0038），只在启动迁移里出现；之后程序不再认识它。 */
+const LEGACY_ATTACHMENTS_DIR_NAME = "attachments";
 
 /** 单个附件上限。必须与 ATTACHMENT_BODY_LIMIT 同源，否则会出现「过了 body 解析
  *  却被业务拒绝」或反之的错位。 */
@@ -118,7 +119,7 @@ export interface AttachmentMeta {
   /** 稳定编码后的文件名（base64url）：前端可当不透明 id 用，也可反解回 name。 */
   id: string;
   name: string;
-  /** 相对 Pi Session 工作目录的路径，永远是 `attachments/<name>`。 */
+  /** 相对 Pi Session 工作目录的路径，永远是 `files/<name>`。 */
   relativePath: string;
   mimeType: string;
   size: number;
@@ -242,7 +243,7 @@ function realWorkPath(row: PiSessionRow): string {
 function assertUsableAttachmentsDir(directory: string, workPath: string): string {
   let stats;
   try {
-    // lstat 而非 stat：attachments 若是符号链接，写入就会被引到工作目录外
+    // lstat 而非 stat：files 目录若是符号链接，写入就会被引到工作目录外
     stats = lstatSync(directory);
   } catch {
     throw new HttpError(403, "附件目录不可用");
@@ -258,7 +259,7 @@ function assertUsableAttachmentsDir(directory: string, workPath: string): string
 /** 上传用：目录不存在就建（历史会话或模型清理过目录时仍要能上传）。 */
 function resolveAttachmentsDirForWrite(row: PiSessionRow): string {
   const workPath = realWorkPath(row);
-  const directory = path.join(workPath, ATTACHMENTS_DIR_NAME);
+  const directory = path.join(workPath, SESSION_FILES_DIR_NAME);
   try {
     mkdirSync(directory, { recursive: true });
   } catch {
@@ -273,13 +274,49 @@ function resolveAttachmentsDirForWrite(row: PiSessionRow): string {
  */
 function resolveAttachmentsDirForRead(row: PiSessionRow): string | null {
   const workPath = realWorkPath(row);
-  const directory = path.join(workPath, ATTACHMENTS_DIR_NAME);
+  const directory = path.join(workPath, SESSION_FILES_DIR_NAME);
   try {
     lstatSync(directory);
   } catch {
     return null;
   }
   return assertUsableAttachmentsDir(directory, workPath);
+}
+
+/**
+ * 一次性迁移（ADR-0038）：旧部署的 `attachments/` 改名为 `files/`。只在启动时跑一遍：
+ * `attachments/` 是真目录且 `files/` 不存在才 rename；两者并存不动、只记日志（相对信息，
+ * 不打绝对路径）。行不存在于磁盘的会话直接跳过。之后程序不再认识 `attachments/`。
+ */
+export function renameLegacyAttachmentDirs(db: Database.Database): { renamed: number; skipped: number } {
+  let renamed = 0;
+  let skipped = 0;
+  const rows = db.prepare("SELECT id, work_path FROM pi_session").all() as Array<{ id: number; work_path: string }>;
+  for (const row of rows) {
+    const legacy = path.join(row.work_path, LEGACY_ATTACHMENTS_DIR_NAME);
+    const target = path.join(row.work_path, SESSION_FILES_DIR_NAME);
+    let legacyStats;
+    try {
+      legacyStats = lstatSync(legacy);
+    } catch {
+      continue;
+    }
+    if (!legacyStats.isDirectory()) continue;
+    let targetExists = true;
+    try {
+      lstatSync(target);
+    } catch {
+      targetExists = false;
+    }
+    if (targetExists) {
+      skipped += 1;
+      console.warn(`[attachments] Pi Session ${row.id} 同时存在 attachments/ 与 files/，未迁移，请手动合并`);
+      continue;
+    }
+    renameSync(legacy, target);
+    renamed += 1;
+  }
+  return { renamed, skipped };
 }
 
 // ============================================================================
@@ -404,7 +441,7 @@ function inspectAttachment(directory: string, name: string, wantData: boolean): 
     const meta: AttachmentMeta = {
       id: encodeAttachmentId(name),
       name,
-      relativePath: `${ATTACHMENTS_DIR_NAME}/${name}`,
+      relativePath: `${SESSION_FILES_DIR_NAME}/${name}`,
       mimeType,
       size: stats.size,
       modifiedAt: stats.mtime.toISOString(),
@@ -515,6 +552,28 @@ export function readAttachment(
   if (directory === null) throw new HttpError(404, "附件不存在");
   const result = inspectAttachment(directory, resolveAttachmentName(directory, idOrName), true);
   return { meta: result.meta, inlineSafe: result.inlineSafe, data: result.data ?? Buffer.alloc(0) };
+}
+
+/** 能作为图片块直接进对话的附件（ADR-0038）：其余文件只把路径告诉模型。 */
+export function isImageAttachment(meta: Pick<AttachmentMeta, "mimeType">): boolean {
+  return INLINE_SAFE_IMAGE_MIME_TYPES.has(meta.mimeType);
+}
+
+/** 给模型看的人类可读大小：`12 KB`、`1.5 MB`；小于 1 KB 直接给字节数。 */
+export function formatAttachmentSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
+/**
+ * 非图片附件的注入文案（ADR-0038）：一行自然语言告诉模型有文件、在哪、多大，由它自己决定
+ * 用什么工具读；后端不做内容转换。图片已随消息作为图片块发送，不再列出。
+ */
+export function describeNonImageAttachments(attachments: readonly AttachmentMeta[]): string {
+  return attachments.filter((file) => !isImageAttachment(file))
+    .map((file) => `用户上传了文件「${file.name}」，路径 ${file.relativePath}（${formatAttachmentSize(file.size)}）。`)
+    .join("\n");
 }
 
 /**

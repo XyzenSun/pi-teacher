@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { configApi } from "../api/client.ts";
-import type { ModelsConfigResponse, PiSettingsResponse } from "../api/types.ts";
+import type { ModelsConfigResponse, PiSettingsResponse, ReminderKind } from "../api/types.ts";
 import { ErrorLine, Field, useSubmit } from "../ui/form.tsx";
+import { UserEnvSection } from "./UserEnvSection.tsx";
 
 /**
- * 高级配置：settings.json 的白名单字段 + models.json 的脱敏 JSON 视图。
+ * 高级配置：settings.json 的白名单字段 + 业务运行设置（setting 表）+ models.json 的脱敏 JSON 视图。
  *
  * 这里不做「任意文件编辑器」：能写的只有后端白名单接受的字段，JSON 视图里凭据
  * 显示为掩码，原样提交等于「保持不变」（后端的三态语义），因此可以安全地把脱敏
@@ -60,6 +61,110 @@ function ProviderJsonEditor({ providerId, secretMaskHint, onSaved }: {
       <div className="flex justify-end">
         <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? "保存中…" : "保存 JSON"}</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 维护提醒间隔（ADR-0036）：存在 pi-teacher 自己的 setting 表，不进 settings.json。
+ * 失焦或 Enter 才保存；输入非法时不发请求，恢复成当前生效值并提示。
+ */
+function ReminderIntervalField({ value, onSaved }: { value: number; onSaved: (app: PiSettingsResponse["app"], message: string) => void }) {
+  const [text, setText] = useState(String(value));
+  const { busy, error, setError, run } = useSubmit();
+  useEffect(() => { setText(String(value)); }, [value]);
+
+  const submit = () => {
+    const next = Number(text.trim());
+    if (text.trim() === "" || !Number.isInteger(next) || next < 0) {
+      setText(String(value));
+      setError("请输入 0 或正整数（0 表示关闭）");
+      return;
+    }
+    if (next === value) return;
+    void run(async () => {
+      const result = await configApi.saveSettings({ reminderIntervalTurns: next });
+      onSaved(result.app, next === 0 ? "已关闭维护提醒。" : `每 ${next} 轮追加维护提醒；学习对话同轮提醒维护精华。`);
+    }).catch(() => setText(String(value)));
+  };
+
+  return (
+    <div className="space-y-1">
+      <Field label="维护提醒间隔（轮）" hint="每隔多少轮对话，在你的消息末尾追加维护提醒；学习对话同轮追加精华提醒。0 关闭全部提醒。改动对已打开的对话立即生效。">
+        <input
+          className="input max-w-[160px] font-mono"
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={text}
+          disabled={busy}
+          onChange={(event) => { setText(event.target.value); setError(null); }}
+          onBlur={submit}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }}
+        />
+      </Field>
+      <ErrorLine error={error} />
+    </div>
+  );
+}
+
+/** 与后端 app-settings.ts 的 REMINDER_TEXT_MAX_LENGTH 一致；前端只提前提示，拒绝仍由服务端判定。 */
+const REMINDER_TEXT_MAX_LENGTH = 4000;
+
+const REMINDER_KIND_LABELS: Record<ReminderKind, { label: string; hint: string }> = {
+  makeCardOn: { label: "学习 / 复习（制卡开启）", hint: "学习与复习对话且制卡开关开启时附加的提醒。" },
+  makeCardOff: { label: "学习 / 复习（制卡关闭）", hint: "学习与复习对话且制卡开关关闭时附加的提醒。" },
+  ta: { label: "助教", hint: "助教对话附加的提醒；助教不维护全局偏好与用户信息，只维护「用户对你的要求」。" },
+  learningEssence: { label: "学习精华", hint: "仅在学习对话的基础提醒后同轮追加，无论制卡是否开启；助教与复习不追加。老师按需维护 essence/，不要求每次写文件。" },
+};
+
+/**
+ * 维护提醒文案（ADR-0036 / ADR-0039）：整段原样拼到用户消息末尾，含 <system-reminder> 标签。
+ * 后端把空串视为「恢复出厂文案」并删行，所以「恢复默认」就是提交空串，回包里带的是出厂文案。
+ */
+function ReminderTextField({ kind, value, onSaved }: {
+  kind: ReminderKind;
+  value: string;
+  onSaved: (app: PiSettingsResponse["app"], message: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  const { busy, error, setError, run } = useSubmit();
+  useEffect(() => { setText(value); }, [value]);
+
+  const { label, hint } = REMINDER_KIND_LABELS[kind];
+  const overLimit = text.length > REMINDER_TEXT_MAX_LENGTH;
+  const dirty = text !== value;
+
+  const save = (next: string) => void run(async () => {
+    const result = await configApi.saveSettings({ reminderTexts: { [kind]: next } });
+    // 原值已是默认时，父组件 value 不会变化，仍需清掉本地未保存的草稿。
+    setText(result.app.reminderTexts[kind]);
+    onSaved(result.app, next.trim() ? `「${label}」提醒文案已保存，下一轮命中时生效。` : `「${label}」提醒文案已恢复默认。`);
+  }).catch(() => {});
+
+  return (
+    <div className="space-y-1">
+      <Field label={label} hint={hint}>
+        <textarea
+          className="input font-mono text-[12px] leading-[1.55]"
+          rows={4}
+          spellCheck={false}
+          value={text}
+          disabled={busy}
+          onChange={(event) => { setText(event.target.value); setError(null); }}
+        />
+      </Field>
+      <div className="flex items-center gap-2">
+        <span className={`text-[11px] ${overLimit ? "text-error" : "text-muted"}`}>
+          {text.length} / {REMINDER_TEXT_MAX_LENGTH} 字符{overLimit ? "，超出上限，请精简后再保存" : ""}
+        </span>
+        <button type="button" className="btn-ghost py-1 ml-auto" disabled={busy} onClick={() => save("")}>恢复默认</button>
+        <button type="button" className="btn-primary py-1" disabled={busy || overLimit || !dirty || !text.trim()} onClick={() => save(text)}>
+          {busy ? "保存中…" : "保存"}
+        </button>
+      </div>
+      <ErrorLine error={error} />
     </div>
   );
 }
@@ -141,6 +246,33 @@ export function AdvancedTab() {
 
       <section className="space-y-3 border-t border-line pt-5">
         <div>
+          <h3 className="font-reading text-[17px] text-primary">教学运行设置</h3>
+          <p className="text-[12px] text-on-surface-variant mt-0.5">
+            Pi Teacher 自己的运行参数，存在数据库里，不写入 Pi 的配置文件。
+          </p>
+        </div>
+        <ReminderIntervalField
+          value={settings.app.reminderIntervalTurns}
+          onSaved={(app, message) => { setSettings((current) => (current ? { ...current, app } : current)); setNotice(message); }}
+        />
+        <div className="space-y-3">
+          <div className="text-[12px] text-on-surface-variant">
+            提醒文案会整段附在你的消息末尾（保留 <span className="font-mono">&lt;system-reminder&gt;</span> 标签）。按对话类型与制卡开关选用一段基础提醒，学习对话再同轮追加「学习精华」。
+            点击「恢复默认」可还原该段出厂文案；改动对已打开的对话下一轮命中时生效。
+          </div>
+          {(Object.keys(REMINDER_KIND_LABELS) as ReminderKind[]).map((kind) => (
+            <ReminderTextField
+              key={kind}
+              kind={kind}
+              value={settings.app.reminderTexts[kind]}
+              onSaved={(app, message) => { setSettings((current) => (current ? { ...current, app } : current)); setNotice(message); }}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3 border-t border-line pt-5">
+        <div>
           <h3 className="font-reading text-[17px] text-primary">Provider JSON</h3>
           <p className="text-[12px] text-on-surface-variant mt-0.5">
             以 JSON 形式核对与编辑单个 Provider 的定义，适合批量修改模型列表。结构化表单在「模型与 Provider」页。
@@ -166,6 +298,8 @@ export function AdvancedTab() {
           </>
         )}
       </section>
+
+      <UserEnvSection />
     </div>
   );
 }

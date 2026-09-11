@@ -60,9 +60,6 @@ export function createCardTopicTools(ctx: SessionToolContext): ToolDefinition[] 
             front: Type.String({ description: "卡片正面（问题）" }),
             back: Type.String({ description: "卡片背面（参考答案或评价标准）" }),
             reason_and_remark: Type.String({ description: "为什么造这张卡、补充说明" }),
-            source_essence_path: Type.Optional(
-                Type.String({ description: "出自哪个 essence 文件的绝对路径，可选" }),
-            ),
         }),
         async execute(_toolCallId, params) {
             const gate = assertToolAllowed(ctx, "card_propose");
@@ -91,15 +88,14 @@ export function createCardTopicTools(ctx: SessionToolContext): ToolDefinition[] 
 
             const result = db
                 .prepare(
-                    `INSERT INTO card (topic_id, front, back, status, reason_and_remark, source_essence_path)
-                     VALUES (?, ?, ?, 'proposed', ?, ?)`,
+                    `INSERT INTO card (topic_id, front, back, status, reason_and_remark)
+                     VALUES (?, ?, ?, 'proposed', ?)`,
                 )
                 .run(
                     topic.id,
                     params.front,
                     params.back,
                     params.reason_and_remark,
-                    params.source_essence_path ?? null,
                 );
 
             return toolResult(
@@ -146,7 +142,7 @@ export function createCardTopicTools(ctx: SessionToolContext): ToolDefinition[] 
     const cardGet = defineTool({
         name: "card_get",
         label: "卡片详情",
-        description: "返回一张卡片的全部字段：id、topic_id、topic_name、front、back、status、reason_and_remark、source_essence_path、created_at。",
+        description: "返回一张卡片的全部字段：id、topic_id、topic_name、front、back、status、reason_and_remark、created_at。",
         parameters: Type.Object({
             card_id: Type.Number({ description: "卡片 id" }),
         }),
@@ -157,7 +153,7 @@ export function createCardTopicTools(ctx: SessionToolContext): ToolDefinition[] 
             const row = db
                 .prepare(
                     `SELECT c.id, c.topic_id, t.name AS topic_name, c.front, c.back, c.status,
-                            c.reason_and_remark, c.source_essence_path, c.created_at
+                            c.reason_and_remark, c.created_at
                      FROM card c JOIN topic t ON t.id = c.topic_id WHERE c.id = ?`,
                 )
                 .get(params.card_id);

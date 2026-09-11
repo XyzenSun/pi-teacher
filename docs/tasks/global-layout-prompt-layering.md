@@ -65,6 +65,8 @@ homeDir/
 
 内容来源：新建 `提示词设计/提示词模板/agentsmd/全局.md`，与助教模板同目录同机制（`readFileSync` 读入，空文件抛错）。不写在 `seed.ts` 字面量里，便于提示词单独迭代。
 
+> 2026-09-11 变更：`docs/提示词设计/` 已删除，全局 AGENTS.md 与各模板的出厂内容统一收在 `server/src/prompts/defaults.ts`（`GLOBAL_AGENTS_MD` / `AGENTS_MD_TEMPLATES` / `TEACH_STYLE_TEMPLATES`），镜像不再带 `docs/`；调提示词改这一个文件。
+
 覆盖范围（只写跨会话类型通用的）：
 
 - 工具调用原则：有明确需求才调用；`card_propose` 仅在制卡开关开启时用，关闭时跳过不解释；卡片必须归属有意义的 Topic，不为临时知识点新建 Topic
@@ -167,7 +169,7 @@ export function buildAppendedSystemPrompt(homeDir: string, workPath: string): st
 | `server/src/projection/system-prompt-builder.ts` | 新增，含固定段落模板 |
 | `server/src/bridge/agent-session-wrapper.ts` | 替换 style 读取；`options.homeDir` |
 | `server/src/routes/conversations.ts` | 调用点传 `homeDir` |
-| `server/src/config/user-preferences.ts` | 新增：读 / 原子写 / 校验 |
+| `server/src/config/home-markdown.ts` | 新增：全局 USER.md / AGENTS.md 读 / 原子写 / 校验（实现时按用户要求加了 `GET/PUT /api/config/global-agents-md`） |
 | `server/src/routes/config.ts` | 新增两条路由 |
 | `server/src/verify/config-check.ts` | 新增全局文件与 builder 四态断言 |
 | `server/src/verify/http-smoke.ts` | 新增 user-preferences 节 + systemPrompt 含全局 AGENTS.md / USER.md / `pi-session-user.md` 引导句断言 |
@@ -194,7 +196,7 @@ export function buildAppendedSystemPrompt(homeDir: string, workPath: string): st
 2. 全局模板文件 + `seed.ts` 补建 → `verify:schema` 加目录断言
 3. `system-prompt-builder.ts` + wrapper 接线 → `verify:config` 加四态断言与引导句断言
 4. 默认模板去重（seed 字面量 + 助教.md）
-5. `user-preferences.ts` + 路由 → `http-smoke` 加节
+5. `home-markdown.ts` + 路由 → `http-smoke` 加节
 6. 前端 Tab → typecheck / build
 7. ADR 与设计文档同步 → 真浏览器验收
 

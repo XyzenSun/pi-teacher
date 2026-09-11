@@ -110,10 +110,10 @@ async function main(): Promise<void> {
         const tableNames = tables.map((t) => t.name).filter((n) => !n.startsWith("sqlite_"));
         const EXPECTED_TABLES = [
             "agents_md", "card", "card_schedule", "glossary", "pi_session",
-            "review_log", "space", "teach_style", "topic", "user",
+            "review_log", "setting", "space", "teach_style", "topic", "user", "user_env",
         ];
         check(
-            "10 张业务表存在（ADR-0030：无 session 表）",
+            `${EXPECTED_TABLES.length} 张业务表存在（ADR-0030：无 session 表；ADR-0034：user_env；ADR-0036：setting）`,
             tableNames.length === EXPECTED_TABLES.length && EXPECTED_TABLES.every((t) => tableNames.includes(t)),
             tableNames,
         );
@@ -165,6 +165,9 @@ async function main(): Promise<void> {
             allTools.map((t) => t.name),
         );
         check("工具名无重复", new Set(allTools.map((t) => t.name)).size === 15);
+        const cardProposeSchema = byName(cardTools, "card_propose").parameters as { properties: Record<string, unknown> };
+        check("card_propose 只接受四个业务参数，不再有精华来源路径", JSON.stringify(Object.keys(cardProposeSchema.properties).sort())
+            === JSON.stringify(["back", "front", "reason_and_remark", "topic_name"]));
         // Anthropic API 只认 ^[a-zA-Z0-9_-]{1,128}$（点号会被拒）——固定约束做回归
         check(
             "工具名符合 API 字符约束",
@@ -210,6 +213,7 @@ async function main(): Promise<void> {
             id: number; topic_name: string; front: string; status: string;
         };
         check("card_get 全字段（含 topic_name）", cardGet.id === cardId && cardGet.topic_name === "Java" && cardGet.status === "proposed", cardGet);
+        check("card_get 不再返回精华来源路径", !Object.hasOwn(cardGet, "source_essence_path") && !Object.hasOwn(cardGet, "has_source_essence"));
         const cardGetMissing = await callTool(byName(cardTools, "card_get"), { card_id: 99999 });
         check("card_get 不存在拒绝", cardGetMissing.includes("拒绝"));
 
@@ -295,6 +299,10 @@ async function main(): Promise<void> {
         confirmCard(db, cardId);
         const dueOne = await callTool(byName(reviewTools, "review_get_due_cards"), { nums: 10 });
         check("取到 1 张到期卡（含 front 与复习历史）", dueOne.includes("本次取到 1 张") && dueOne.includes("垃圾回收"), dueOne.split("\n")[0]);
+        const dueCards = parseDueCardsJson(dueOne);
+        check("复习取卡保留卡面与进度字段，不再带精华来源", dueCards.length === 1 && dueCards.every((card) =>
+            "back" in card && "reps" in card && "last_review" in card
+            && !Object.hasOwn(card, "source_essence_path") && !Object.hasOwn(card, "has_source_essence")));
         const dueByTopic = await callTool(byName(reviewTools, "review_get_due_cards"), { nums: 10, topic_id: javaTopicId });
         check("topic_id 显式过滤取卡", dueByTopic.includes("本次取到 1 张"));
         const dueByWrongTopic = await callTool(byName(reviewTools, "review_get_due_cards"), { nums: 10, topic_id: 99999 });

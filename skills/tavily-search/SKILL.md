@@ -13,9 +13,9 @@ allowed-tools: Bash(./scripts/tavily-search *)
 
 ## 密钥配置
 
-密钥从 `~/pi-teacher/.env` 读取（`TAVILY_API_KEY` / `TAVILY_BASE_URL` / `TAVILY_TIMEOUT`）。
-首次调用前先确认该文件存在；不存在或缺失 key 时，把问题报告给用户，不要尝试其他路径。
-命令统一带 `--env-file ~/pi-teacher/.env` 参数（环境变量已注入时它会自动让位，两者兼容）。
+`TAVILY_API_KEY` / `TAVILY_BASE_URL` / `TAVILY_TIMEOUT` 由 Pi Teacher 后端作为环境变量注入到命令进程，
+命令**不要**带 `--env-file`，也不要去找任何配置文件。
+命令因缺少 key 报错时，直接告诉用户：到「系统设置 → 高级配置 → 用户环境变量」填写 `TAVILY_API_KEY`，保存后立即生效，无需重开对话；不要自行尝试其他路径或猜测密钥。
 
 默认输出 Markdown，适合快速获取搜索结果、答案摘要和可引用来源。
 
@@ -36,7 +36,6 @@ allowed-tools: Bash(./scripts/tavily-search *)
 
 | 参数 | 示例 | 何时使用 | 注意事项 |
 |---|---|---|---|
-| `--env-file <path>` | `--env-file ~/pi-teacher/.env` | 需要显式指定配置文件位置时 | 密钥统一在 `~/pi-teacher/.env`，搜索前先确认该文件存在（见下「密钥配置」） |
 | `--max-results <n>` | `--max-results 5` | 控制返回数量 | 默认 `5` |
 | `--include-answer <mode>` | `--include-answer basic` | 需要 Tavily 直接给答案 | 常用 `basic` 或 `advanced` |
 | `--topic news` | `--topic news` | 新闻、近期事件、舆情 | 普通网页搜索不用加 |
@@ -55,6 +54,6 @@ allowed-tools: Bash(./scripts/tavily-search *)
 |---|---|---|
 | 控制搜索深度、时间范围、日期、新闻/金融 topic、国家、自动参数、精确匹配 | `references/advanced-search.md` | `--search-depth`、`--topic`、`--time-range`、`--start-date`、`--end-date`、`--country`、`--auto-parameters`、`--exact-match` |
 | 限定/排除站点、获取 raw content、图片、favicon、每来源 chunks | `references/content-and-filters.md` | `--include-domain`、`--exclude-domain`、`--include-raw-content`、`--include-images`、`--include-image-descriptions`、`--include-favicon`、`--chunks-per-source` |
-| 输出 JSON、timeout、env-file、base URL、完整 help | `references/advanced-cli.md` | `--format`、`--timeout`、`--env-file`、`TAVILY_BASE_URL`、help 命令 |
+| 输出 JSON、timeout、base URL、完整 help | `references/advanced-cli.md` | `--format`、`--timeout`、`TAVILY_BASE_URL`、help 命令 |
 
 如果用户只是普通联网搜索、新闻搜索或需要简短答案，不需要读取 references，直接使用上面的高频命令。

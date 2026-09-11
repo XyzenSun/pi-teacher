@@ -99,6 +99,7 @@ async function main(): Promise<void> {
         const stableKey = sessionKeyFor(piRow.id);
         const started = await startWorkspaceSession(stableKey, piRow.work_path, sessionContext, {
             sessionFile: piRow.path,
+            homeDir,
         });
         wrapper = started.session;
         const { realSessionId } = started;
@@ -201,6 +202,27 @@ async function main(): Promise<void> {
             eventNames.includes("tool_execution_start") && eventNames.includes("tool_execution_end"));
         check("wrapper 转发 agent_settled（run 置空闲）", eventNames.includes("agent_settled"));
         check("wrapper 转发 prompt_done（一轮结束）", eventNames.includes("prompt_done"));
+
+        // —— 会话级偏好只靠引导句：模型要能分清「本次对话的要求」与「全局偏好」——
+        console.log("\n[6] 真模型：会话级偏好文件由模型自行维护");
+        const systemPrompt = wrapper.inner.agent.state?.systemPrompt ?? "";
+        check("系统提示含全局 AGENTS.md（Pi 祖先遍历自动发现）", systemPrompt.includes("Pi Teacher 全局规则"));
+        check("系统提示含会话级偏好引导句", systemPrompt.includes("<会话级用户偏好>") && systemPrompt.includes("pi-session-user.md"));
+        const sessionPreferencePath = path.join(piRow.work_path, "pi-session-user.md");
+        const waitIdle = async () => {
+            const until = Date.now() + 180_000;
+            while (Date.now() < until && wrapper!.isRunning()) await new Promise((resolve) => setTimeout(resolve, 500));
+        };
+        await wrapper.send({ type: "prompt", message: "这次对话里所有代码示例都用 Rust 写。记住这个要求，回复一句「好」即可。" });
+        await waitIdle();
+        const sessionPreference = await fs.readFile(sessionPreferencePath, "utf8").catch(() => "");
+        check("模型为本会话要求创建了 pi-session-user.md", sessionPreference.length > 0, toolCalls.slice(-4));
+        check("文件内容包含该要求", /rust/i.test(sessionPreference), sessionPreference.slice(0, 200));
+        await wrapper.send({ type: "prompt", message: "以后所有对话都少用类比。回复一句话即可。" });
+        await waitIdle();
+        const sessionPreferenceAfter = await fs.readFile(sessionPreferencePath, "utf8").catch(() => "");
+        check("全局性偏好没有被写进 pi-session-user.md", !sessionPreferenceAfter.includes("类比"), sessionPreferenceAfter.slice(0, 200));
+        check("程序侧未创建或读取会话级偏好文件之外的 USER.md 副本", !(await fs.stat(path.join(piRow.work_path, "USER.md")).then(() => true).catch(() => false)));
 
         console.log(`\n结果：${passed} 通过，${failed} 失败`);
     } finally {
