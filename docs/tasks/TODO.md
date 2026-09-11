@@ -1,8 +1,8 @@
 # TODO
 
-## 当前阶段：资料归档与学习精华已实现，工程验收完成，待用户 WebUI 验收
+## 当前阶段：资料归档与学习精华已实现并部署到验证容器，待用户 WebUI 验收
 
-**materials-and-learning-essence（2026-09-11）**：PRD 见 `materials-and-learning-essence.md`，决策见 ADR-0039。全局资料分流规范、学习专属空 `essence/` 与同轮提醒、第四段可编辑文案、卡片来源字段移除及旧库迁移均已落地；代码与根 `CLAUDE.md` 审查通过。`http-smoke` 的自动标题 payload 误判已修正，完整重跑 **522 通过、0 失败、0 跳过**，后端 typecheck 同轮通过。`verify` 本次 27 通过、1 失败（模型把全局偏好写进会话文件），按用户决定不再追测，保留失败记录，不记为通过。浏览器由用户验收；本阶段 Docker 镜像尚未重建，无 commit / push。
+**materials-and-learning-essence（2026-09-11）**：PRD 见 `materials-and-learning-essence.md`，决策见 ADR-0039。全局资料分流规范、学习专属空 `essence/` 与同轮提醒、第四段可编辑文案、卡片来源字段移除及旧库迁移均已落地；代码与根 `CLAUDE.md` 审查通过。`http-smoke` 的自动标题 payload 误判已修正，完整重跑 **522 通过、0 失败、0 跳过**，后端 typecheck 同轮通过。`verify` 本次 27 通过、1 失败（模型把全局偏好写进会话文件），按用户决定不再追测，保留失败记录，不记为通过。ADR-0033–0039 与 Docker 部署已随 commit `97dd87c` 推送到 `origin/main`；镜像 `pi-teacher:local` 已重建，隔离验证容器（`pi-teacher-verify`，端口 39873）按 `deploy.md` 流程停止 → 备份 → `up -d` 更新：旧库 `card.source_essence_path` 已自动删列，账号、会话、`user_env` 保留，`verify:remote` **49 通过、0 失败**（含真模型跑 skill）。浏览器由用户在该容器上验收。
 
 以下保留前阶段进度记录；各轮测试数字仅代表当轮结果。
 
@@ -16,7 +16,7 @@
 
 ## 上一阶段：预生产准备（2026-09-10 立项，历史说明）
 
-六项均已落地：助教常驻与清除、周期维护提醒、会话真删除、`files/` 及 Docker 部署文件。前阶段镜像与隔离容器已验证；当前资料精华代码尚未重建进镜像，容器与浏览器验收状态不能沿用旧结果。部署的最终形态以 `docs/deploy.md` 为准：Node 24、tsx、容器 root、两个默认相对路径挂载，内置 skill 随镜像覆盖同名目录，出厂提示词集中在 `prompts/defaults.ts`，全局 AGENTS.md 不入库，提醒文案存 `setting`。
+六项均已落地：助教常驻与清除、周期维护提醒、会话真删除、`files/` 及 Docker 部署文件。镜像已包含资料精华阶段代码并在隔离容器上通过 `verify:remote`（见上）。部署的最终形态以 `docs/deploy.md` 为准：Node 24、tsx、容器 root、两个默认相对路径挂载，内置 skill 随镜像覆盖同名目录，出厂提示词集中在 `prompts/defaults.ts`，全局 AGENTS.md 不入库，提醒文案存 `setting`。
 
 **以下六项保留立项快照，不代表当前实现仍缺失。** 原 PRD 见 `preproduction-readiness.md`；ADR-0035–0038 记录定稿，ADR-0039 进一步细化资料与精华职责，早期「待确认」和提示词文档路径不再作为当前实施依据。
 
@@ -85,7 +85,7 @@
 
 `verify` 本轮 27 通过、1 失败：模型把全局偏好误写进 `pi-session-user.md`。按用户决定不再追测，保留原断言与失败记录，不记为通过；浏览器由用户验收。
 
-升级注意：已有 `~/pi-teacher/AGENTS.md` 不自动覆盖，需手工合并新资料规范；原三段自定义提醒不重置，新精华文案缺行即有默认值。容器需重建镜像，本阶段尚未构建。详见 `docs/deploy.md`。
+升级注意：已有 `~/pi-teacher/AGENTS.md` 不自动覆盖，需手工合并新资料规范；原三段自定义提醒不重置，新精华文案缺行即有默认值。容器需重建镜像（验证容器已按此流程升级，生产实例升级时同样先备份）。详见 `docs/deploy.md`。
 
 ## 待设计 / 待实现（从根 todo.md 合并，仍有效）
 
