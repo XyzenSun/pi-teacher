@@ -2,6 +2,12 @@
 
 基于 Pi Coding Agent SDK 的 Web 学习助手：用多种教学风格讲解资料、制卡、按 FSRS 复习。领域语言以 `docs/CONTEXT.md` 为准（Space / Pi Session / Agents Md / Teach Style / Briefing），文档与代码里的命名跟随它。
 
+## 分支模型
+
+- `dev-codeup`：私有主开发分支（codeup），完整源码 + `docs/`；日常开发、验证、修复与功能新增都在这里进行。
+- `main`：开源稳定分支（GitHub `XyzenSun/pi-teacher`），只发布验证过的版本；私有内容（`docs/`、`AGENTS.md`、`CLAUDE.md`、`.claude/`、`skills/sbx/sourcecode/README.md`）被该分支的 `.gitignore` 排除。
+- 同步方式：dev-codeup 的提交 cherry-pick 到 main 后推送 GitHub；两分支无共同历史，merge 不可用。cherry-pick 触及私有路径的提交时用 `-n` 进工作区、剔除被排除路径后再提交。
+
 ## 目录结构
 
 ```
