@@ -36,7 +36,7 @@ const { ensureGlobalLayout } = await import("../db/seed.ts");
 const { GLOBAL_AGENTS_MD, MATERIALS_INDEX_PLACEHOLDER, USER_PREFERENCES_PLACEHOLDER } = await import("../prompts/defaults.ts");
 const { buildAppendedSystemPrompt } = await import("../projection/system-prompt-builder.ts");
 const { readHomeMarkdownContent, writeHomeMarkdown, readHomeMarkdown } = await import("../config/home-markdown.ts");
-const { bootstrapUserEnv, listUserEnv, readUserEnvPatch, applyUserEnvPatch, deleteUserEnv } = await import("../config/user-env.ts");
+const { BUILTIN_USER_ENV, bootstrapUserEnv, listUserEnv, readUserEnvPatch, applyUserEnvPatch, deleteUserEnv } = await import("../config/user-env.ts");
 const { initializeSchema } = await import("../db/schema.ts");
 const { default: Database } = await import("better-sqlite3");
 
@@ -313,7 +313,10 @@ async function main(): Promise<void> {
     check("内置未设置项仍在列且 configured=false、无 value", listed.find((item) => item.key === "TAVILY_TIMEOUT")?.configured === false
       && listed.find((item) => item.key === "TAVILY_TIMEOUT")?.builtin === true && !("value" in listed.find((item) => item.key === "TAVILY_TIMEOUT")!));
     check(".env 导入的自定义项标记为用户项且回显值", listed.find((item) => item.key === "MY_SKILL_TOKEN")?.builtin === false && listed.find((item) => item.key === "MY_SKILL_TOKEN")?.value === DOTENV_VALUE);
-    check("列表按内置项在前、用户项按名排序", listed.map((item) => item.key).join(",") === "TAVILY_API_KEY,TAVILY_BASE_URL,TAVILY_TIMEOUT,MY_SKILL_TOKEN");
+    // 期望值从 BUILTIN_USER_ENV 动态构造：内置项顺序即定义顺序，用户项按名排在后面；
+    // 硬编码会在内置项扩充（ADR-0040/0041 加了 13 项）后悄悄过期。
+    const expectedOrder = [...BUILTIN_USER_ENV.map((item) => item.key), "MY_SKILL_TOKEN"];
+    check("列表按内置项在前、用户项按名排序", listed.map((item) => item.key).join(",") === expectedOrder.join(","));
 
     await rejects("受保护变量 PATH 被拒", () => readUserEnvPatch({ PATH: "/x" }), "部署环境管理");
     await rejects("受保护前缀 PI_TEACHER_ 被拒", () => readUserEnvPatch({ PI_TEACHER_HOME: "/x" }), "部署环境管理");

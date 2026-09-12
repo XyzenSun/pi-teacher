@@ -5,6 +5,7 @@ import "./styles.css";
 import { AuthProvider, useAuth } from "./auth/AuthContext.tsx";
 import { AuthPage, FullscreenNotice } from "./auth/AuthPage.tsx";
 import { AppShell } from "./app/AppShell.tsx";
+import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 
 /** 受保护路由：未登录去 /login，未初始化去 /setup。 */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -40,4 +41,10 @@ function Root() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><Root /></StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <ErrorBoundary>
+      <Root />
+    </ErrorBoundary>
+  </StrictMode>,
+);

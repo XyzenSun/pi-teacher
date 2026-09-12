@@ -14,6 +14,7 @@
     "verify:schema": "tsx src/verify/schema-check.ts",
     "verify:config": "tsx src/verify/config-check.ts",
     "verify:attachments": "tsx src/verify/attachments-check.ts",
+    "verify:catalog": "tsx src/verify/catalog-check.ts",
     "verify:remote": "tsx src/verify/remote-check.ts"
   },
   "dependencies": {

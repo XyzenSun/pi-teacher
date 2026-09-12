@@ -1,6 +1,15 @@
 # TODO
 
-## 当前阶段：tingwu-transcribe 接入为第五个内置 skill（已实现，待容器验收）
+## 当前阶段：模型目录脱节与高级设置白屏修复（已实现，待用户 WebUI 验收）
+
+**model-catalog-fingerprint（2026-09-12）**：两个前端 bug 的根因均在后端，已修复并重启 dev 后端（端口 39871）。
+
+- **`/api/models` 503 → 对话框「未配置模型」**：`getModelCatalog()` 是进程级单例，原本只在界面内保存配置时 refresh；用户用 pi CLI 升级（0.84.2→0.85.1 迁移产生 `.bak`）与手动编辑改了 `~/.pi/agent/models.json`（provider 改名扩模型）与 `settings.json`（设默认模型）后，运行中的后端永远拿着旧快照——`selectDefaultModel` 现读 settings 要新组合、旧快照里找不到 → 503；而设置页 `/api/config/models` 现读文件显示已配置，两个接口数据源脱节。修复：`session/models.ts` 加 models.json+auth.json 的 (mtimeMs,size) 指纹检测，`getModelCatalog()` 发现磁盘变化自动 `refresh({ allowNetwork: false })`（重载失败退回旧目录）；`refreshModelCatalog()` 排队双检避免并发重复刷新。
+- **GET /api/models 降级**：默认模型不可用时不再整接口 503（用户连可用模型都看不到），改为列表照常返回 + `defaultModel: null`（前端已支持该形态）；开会话路径（agent-session-wrapper）保持抛 503——不能静默换模型开课。
+- **高级设置白屏**：后端进程是 Sep10 启动的旧代码（`setting` 表与 `/api/config/settings` 的 `app` 字段都是 `97dd87c` Sep11 才落地），Vite 前端热更新是新代码，`settings.app.reminderIntervalTurns` 上 TypeError → 无 ErrorBoundary → 整页白屏；其他 tab 不依赖 `app` 所以正常。修复：重启后端（新代码幂等补建 `setting` 表，实测已补、admin 账号保留）+ 前端新增顶层 `ErrorBoundary`（`web/src/ui/ErrorBoundary.tsx`），未来渲染错误显示可读错误页而非白屏。
+- 验证：后端 typecheck、`verify:catalog`（新增，12/0：指纹检测自动重载、auth.json 变化、显式刷新、503 语义、路由层降级）、`verify:config` 108/0（顺手修复 BUILTIN_USER_ENV 扩到 13 项后硬编码期望过期的既有失败断言，改为动态构造）、`verify:lifecycle` 18/0、`http-smoke` 522/0（octopus / deepseek-normal-latest）、前端 build 通过。踩坑（setsid 残留进程写覆盖日志造成假失败）记入 spec.md。
+
+## 上一阶段：tingwu-transcribe 接入为第五个内置 skill（已实现，待容器验收）
 
 **tingwu-transcribe（2026-09-12）**：决策见 ADR-0042。上游已改版为 skill 形态（`scripts/cli.js` 纯命令行入口 + 零第三方依赖），「必须常驻网关」这一阻塞点消失，**原样接入、一行不改**；接入时仅删除随目录带来的 `.git`。两个已知取舍经用户确认接受：① 登录 Cookie 默认落在 skill 目录内，容器重启 / 升级镜像后需重新设置（Cookie 本来就会过期、失效时 CLI 明确提示 `COOKIE_INVALID`；要跨重启保留可设 `TW_COOKIE_FILE` 指向挂载卷，已写进 deploy.md）；② `server.js` 默认 `0.0.0.0:8787` 无鉴权，但容器未 EXPOSE 该端口且不自启动，风险被容器边界隔离。不走 `user_env` 表——Cookie 需要程序验证后回写，与人工维护的配置表语义不符。验证：宿主与容器内 `cli.js` help / `cookie check`（`COOKIE_MISSING`，退出码 1）/ 假 Cookie 真实打到听悟返回 `CMN.NotLogin` 且不落盘；`.dockerignore` 的 `*.md` 只匹配根目录，`SKILL.md` 与 `references/` 实测完整进镜像。待做：重建镜像 → 更新验证容器 → `verify:remote`（skill 探针是否扩到五个待定）。
 

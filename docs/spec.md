@@ -162,3 +162,18 @@ bug影响与触发条件: 三个 Node skill（`tavily-search` / `pullpage` / `ex
 bug原因: 该轮要求真模型在一次回复里用 bash 跑完四条 skill 命令（`remote-check.ts` 的 `skillProbePrompt`），比普通对话重得多。手动复现同一 prompt 实测约 60 秒，但模型偶尔会在这一轮上耗尽 240 秒的 `waitFor`，报「等待超时：SSE prompt_done（真模型完成回复）」。
 bug影响与触发条件: 与被验证的代码无关，换慢模型（如 agnes-2.5-flash）时更容易命中。`http-smoke` 末尾的真模型轮同理，曾因同一原因超时，换 octopus / deepseek-normal-latest 后 522 项一次过。
 解决方法: 先重跑一次再怀疑代码；跑之前把默认模型指向快的 provider——`http-smoke` 用 `PI_TEACHER_PROVIDER=octopus PI_TEACHER_MODEL=deepseek-normal-latest npm run http-smoke`（脚本内是 `??=`，环境变量能覆盖默认的 agnes），容器则在 `docker compose up -d` 时带上同名变量。排查时不要手搓 curl 复现：`POST /api/conversations` 的字段是 `spaceId` + `agentsMdId`（不是 `workspaceId`），`POST /command` 的字段是 `message`（不是 `text`），且 SSE 在独立的 `GET /api/conversations/:id/events`，猜错字段只会收到 400 而看起来像「模型不回」。
+
+### 模型目录单例与界面外配置修改脱节，表现为「设置页已配置、模型列表 503」
+bug原因: `getModelCatalog()`（`server/src/session/models.ts`）是进程级单例，只在界面内保存 provider 配置时经 `refreshModelCatalog()` 重载。用户在界面外改 `~/.pi/agent/models.json` 或 `auth.json`（pi CLI 配置、手动编辑、CLI 版本升级迁移）后端无从得知；`selectDefaultModel` 的 provider/modelId 每次 `SettingsManager.create` 现读 settings.json，而 available 快照停在启动时——settings 要新组合、旧快照里没有，`GET /api/models` 抛 503。同机的 `/api/config/models` 每次现读 models.json 显示「已配置」，两个接口数据源脱节是定位线索。
+bug影响与触发条件: 长期运行的后端 + 任何界面外的配置修改。症状是对话框模型选择器只剩「未配置模型」（前端在 models 为空时的兜底文案），设置页却一切正常。
+解决方法: `getModelCatalog()` 里比较 models.json + auth.json 的 (mtimeMs,size) 指纹，发现磁盘变化自动 `refresh({ allowNetwork: false })`，重载失败退回旧目录而不是 500；验证脚本 `npm run verify:catalog`。settings.json 不用纳入指纹——默认模型本来就每次现读。另注意 `GET /api/models` 对默认模型不可用已降级为列表照常返回 + `defaultModel: null`，开会话路径仍抛 503。
+
+### tsx 直跑的后端进程不会热重载，新前端 + 旧后端进程组合会把缺字段白屏
+bug原因: `npm run dev` 用 tsx 直跑 TS，进程只在启动时编译加载一次，磁盘代码后续变更不影响运行中进程；而 Vite dev 是按需热更新的。两者版本错位时（本次：后端 Sep10 启动、`97dd87c` Sep11 才落地 `setting` 表与 `app` 字段），新前端渲染 `settings.app.reminderIntervalTurns` 在 undefined 上抛 TypeError，React 无 ErrorBoundary 时卸载整棵树——「加载中然后白屏、其他 tab 正常」。
+bug影响与触发条件: 任何「改了后端代码但只重启了前端（或都没重启）」的 dev 流程；症状是特定 tab 白屏且浏览器控制台有 TypeError。
+解决方法: 改后端代码后重启 `npm run dev` 进程；数据库缺表由 `initializeSchema` 幂等补建（`CREATE TABLE IF NOT EXISTS`），重启即自愈。前端已加顶层 ErrorBoundary（`web/src/ui/ErrorBoundary.tsx`），未来渲染错误显示可读错误页而非白屏。
+
+### setsid 后台跑验证脚本，残留进程会往被覆盖的日志里写旧结果，造成「假失败」
+bug原因: 用 `(setsid npm run http-smoke > log &)` 起的验证进程不受外层 bash 超时影响；外层超时后进程继续跑，最终把失败写进日志文件。下一轮验证用 `>` 截断同名日志时，残留进程仍持有旧句柄按原偏移写入——新日志里出现「上一轮的失败」，看起来像新代码失败。
+bug影响与触发条件: 连续多轮后台跑同名日志的验证脚本，且前一轮因模型慢等原因超时未结束。
+解决方法: 起下一轮前 `pkill -f <脚本名>` 确认清场，或每轮用不同日志文件名；判断真假失败以「断言计数 + 进程存活 + 耗时是否合理」交叉验证（180 秒的 waitFor 不可能 30 秒超时）。
