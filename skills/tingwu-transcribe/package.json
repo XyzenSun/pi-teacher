@@ -1,0 +1,12 @@
+{
+  "name": "tingwu-transcribe",
+  "version": "1.0.0",
+  "description": "通义听悟网页版私有 API 的本地网关：封装上传转写 / 任务列表 / 结果获取 / 导出下载",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

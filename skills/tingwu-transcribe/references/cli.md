@@ -1,0 +1,81 @@
+# CLI 完整参考
+
+入口：`node scripts/cli.js <command> [args] [--options]`（在 skill 目录下执行）。
+
+输出约定：
+
+- 成功：JSON 到 stdout（export/txt 输出文件内容到 stdout 的模式除外）
+- 业务失败：`{error, code, detail}` JSON 到 stderr，退出码 1
+- 用法错误（缺参数、未知命令）：提示文本到 stderr，退出码 2
+
+## transcribe —— 上传并转写
+
+```bash
+node scripts/cli.js transcribe <本地文件路径 | http(s)URL>
+```
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| `--show-name <n>` | 文件名去扩展名 | 任务显示名 |
+| `--lang <lang>` | cn | 语言 |
+| `--role-split <n>` | 0 | 说话人分离人数，0=不分离 |
+| `--dir-id <n>` | 0 | 目标文件夹 id |
+| `--wait` | 关 | 同步等待转写完成再返回 |
+| `--timeout <sec>` | 900 | wait 模式轮询超时秒数 |
+
+返回 `{transId, taskId, showName, fileFormat, fileSize, uploadMethod, status}`；`--wait` 完成后附 `duration/wordCount` 且 status=done。URL 输入由 CLI 代为下载，文件名从 URL 路径推断。
+
+## status —— 单任务状态
+
+```bash
+node scripts/cli.js status <transId>
+```
+
+返回听悟原始响应。status 含义：0=转写完成，1=转写中。
+
+## result —— 转写结果
+
+```bash
+node scripts/cli.js result <transId> [--text]
+```
+
+默认输出完整 JSON：`text`（全文）、`paragraphs[]`（speaker/startTimeMs/endTimeMs/text）、`playback`（回放 URL，有时效）、`rawResult`（原始数据）。`--text` 只输出全文纯文本。
+
+## list —— 任务列表
+
+```bash
+node scripts/cli.js list [--page 1] [--size 20] [--status 0|1] [--name 关键词]
+```
+
+## export —— 导出 SRT
+
+```bash
+node scripts/cli.js export <transId> [-o out.srt] [--file-type 2] [--raw-url]
+```
+
+- 默认导出 SRT（抓包验证组合：docType=1, fileType=2）；`--file-type` 可显式指定其他枚举值（未验证）
+- `-o` 写文件并输出 `{written, filename}`；省略则文件内容写到 stdout（文件名打到 stderr）
+- `--raw-url` 输出 `{downloadUrl, filenameHint}`（OSS 签名 URL，有时效）而非文件内容
+
+## txt —— 带说话人时间戳的纯文本
+
+```bash
+node scripts/cli.js txt <transId> [-o out.txt]
+```
+
+每行 `[mm:ss][说话人N]` 前缀。`-o` 写文件；省略则输出到 stdout。
+
+## cookie —— Cookie 管理
+
+```bash
+node scripts/cli.js cookie set '<纯Cookie值>'    # 值为 - 时从 stdin 读
+node scripts/cli.js cookie check
+```
+
+set 先真实访问听悟任务列表验证，成功才落盘（cookie.txt，权限 600）；失败保留旧 Cookie。Cookie 获取方法见 [cookie.md](cookie.md)。
+
+## help
+
+```bash
+node scripts/cli.js help
+```

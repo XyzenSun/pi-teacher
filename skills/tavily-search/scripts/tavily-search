@@ -1,0 +1,341 @@
+#!/usr/bin/env node
+// tavily-search：Tavily Search API 的零依赖 Node CLI。
+//
+// 由上游 Go 实现移植（行为契约见 docs/tasks/tavily-search-node-rewrite.md）：
+// 复用镜像自带的 Node 运行时，不再维护 Go 工具链与架构绑定的静态二进制。
+// 有意的行为变更只有两处：缺 key 报错指向设置页（ADR-0034）、删除 --env-file
+// （SKILL.md 与 references 本就明令不要传）。
+//
+// parseDuration / readEnvFile / getSetting / writeOutput 等与
+// skills/exa-search/scripts/exa-search 同源：skill 目录各自独立同步进
+// ~/.pi/agent/skills，必须自包含，跨 skill 无法共享 import——这是对
+// 「减少重复」的有意例外，改动时同步两处。
+import { parseArgs } from "node:util";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const HELP = `Usage:
+  tavily-search search <query> [flags]
+
+Common flags:
+  --format <markdown|json|pretty-json>  Output format; default markdown
+  --json                                Equivalent to --format json
+  --pretty                              Equivalent to --format pretty-json
+  --timeout <duration>                  Request timeout; default TAVILY_TIMEOUT or 60s
+
+Search flags:
+  --search-depth <basic|advanced|fast|ultra-fast>
+  --chunks-per-source <n>
+  --max-results <n>
+  --topic <general|news|finance>
+  --time-range <day|week|month|year>
+  --start-date <YYYY-MM-DD>
+  --end-date <YYYY-MM-DD>
+  --include-answer <false|true|basic|advanced>
+  --include-raw-content <false|true|markdown|text>
+  --include-images
+  --include-image-descriptions
+  --include-favicon
+  --include-domain <domain>             Repeatable
+  --exclude-domain <domain>             Repeatable
+  --country <country>
+  --auto-parameters
+  --exact-match
+`;
+
+const DEFAULT_BASE_URL = "https://api.tavily.com";
+
+function printHelp(output = process.stdout) {
+  output.write(HELP);
+}
+
+function fail(message) {
+  console.error(message);
+  process.exitCode = 1;
+}
+
+// 与 Go strconv.Atoi 同语义：可选符号 + 纯数字，否则报错（parseArgs 只给字符串，
+// 不自己校验的话 "abc" 会静默变成 NaN 并以 null 进请求体）。
+function parseInteger(value, name) {
+  if (!/^[+-]?\d+$/.test(value.trim())) {
+    throw new Error(`invalid value ${JSON.stringify(value)} for flag -${name}: parse error`);
+  }
+  return Number.parseInt(value, 10);
+}
+
+function parseCommandLine(argv) {
+  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    printHelp();
+    return null;
+  }
+
+  const command = argv[0];
+  if (command !== "search") {
+    printHelp(process.stderr);
+    throw new Error(`unknown command ${JSON.stringify(command)}`);
+  }
+
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv.slice(1),
+      options: {
+        format: { type: "string", default: "markdown" },
+        json: { type: "boolean", default: false },
+        pretty: { type: "boolean", default: false },
+        timeout: { type: "string" },
+        "search-depth": { type: "string", default: "basic" },
+        "chunks-per-source": { type: "string", default: "0" },
+        "max-results": { type: "string", default: "5" },
+        topic: { type: "string", default: "general" },
+        "time-range": { type: "string", default: "" },
+        "start-date": { type: "string", default: "" },
+        "end-date": { type: "string", default: "" },
+        "include-answer": { type: "string", default: "false" },
+        "include-raw-content": { type: "string", default: "false" },
+        "include-images": { type: "boolean", default: false },
+        "include-image-descriptions": { type: "boolean", default: false },
+        "include-favicon": { type: "boolean", default: false },
+        "include-domain": { type: "string", multiple: true },
+        "exclude-domain": { type: "string", multiple: true },
+        country: { type: "string", default: "" },
+        "auto-parameters": { type: "boolean", default: false },
+        "exact-match": { type: "boolean", default: false },
+      },
+      allowPositionals: true,
+      strict: true,
+    });
+  } catch (error) {
+    throw new Error(error.message);
+  }
+
+  // Go 版 splitFlagsAndQuery 的等价物：query 是全部位置参数以空格连接后 trim，
+  // flag 允许出现在 query 前或后。
+  const query = parsed.positionals.join(" ").trim();
+  if (!query) throw new Error("missing query");
+  return { query, values: parsed.values };
+}
+
+function skillDir() {
+  return path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+}
+
+function readEnvFile(filePath) {
+  const values = {};
+  let content;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch {
+    return values;
+  }
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const equals = line.indexOf("=");
+    if (equals <= 0) continue;
+    const key = line.slice(0, equals).trim();
+    const value = line.slice(equals + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) values[key] = value;
+  }
+  return values;
+}
+
+// 环境变量优先；.env 只为仓库外直接运行旧 skill 的方式保留兼容兜底。
+function getSetting(key, dotenv) {
+  const value = (process.env[key] || "").trim();
+  return value || dotenv[key] || "";
+}
+
+// Go time.ParseDuration 的子集（ns|us|µs|ms|s|m|h 可连写），TAVILY_TIMEOUT 沿用旧值格式。
+function parseDuration(value) {
+  const source = String(value).trim();
+  const pattern = /([+-]?(?:\d+(?:\.\d*)?|\.\d+))(ns|us|µs|ms|s|m|h)/gy;
+  let position = 0;
+  let milliseconds = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const factors = { ns: 1e-6, us: 1e-3, "µs": 1e-3, ms: 1, s: 1e3, m: 60e3, h: 3600e3 };
+    milliseconds += amount * factors[unit];
+    position = pattern.lastIndex;
+  }
+  if (position !== source.length || !Number.isFinite(milliseconds) || milliseconds <= 0) {
+    throw new Error(`invalid timeout ${JSON.stringify(value)}`);
+  }
+  return Math.max(1, Math.ceil(milliseconds));
+}
+
+function loadConfig(values) {
+  const dotenv = readEnvFile(path.join(skillDir(), ".env"));
+  const apiKey = getSetting("TAVILY_API_KEY", dotenv);
+  if (!apiKey) {
+    throw new Error("缺少 TAVILY_API_KEY；请在系统设置 → 高级配置 → 用户环境变量中填入");
+  }
+  const baseURL = (getSetting("TAVILY_BASE_URL", dotenv) || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const timeoutText = values.timeout || getSetting("TAVILY_TIMEOUT", dotenv) || "60s";
+  return {
+    apiKey,
+    baseURL,
+    timeoutMs: parseDuration(timeoutText),
+  };
+}
+
+// "true"/"false"（大小写不敏感）转布尔；其余非空字符串原样传给 API
+// （basic/advanced/markdown/text）；空串则字段整个不出现。Go parseBoolish 的语义。
+function parseBoolish(value) {
+  const lowered = value.toLowerCase();
+  if (lowered === "true") return true;
+  if (lowered === "false") return false;
+  return value ? value : undefined;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : value === undefined ? [] : [value];
+}
+
+function setIfNotEmpty(target, key, value) {
+  if (value !== undefined && value !== "") target[key] = value;
+}
+
+function buildSearchBody(query, values) {
+  const body = {
+    query,
+    search_depth: values["search-depth"],
+    max_results: parseInteger(values["max-results"], "max-results"),
+    topic: values.topic,
+  };
+  const chunksPerSource = parseInteger(values["chunks-per-source"], "chunks-per-source");
+  if (chunksPerSource > 0) body.chunks_per_source = chunksPerSource;
+  setIfNotEmpty(body, "time_range", values["time-range"]);
+  setIfNotEmpty(body, "start_date", values["start-date"]);
+  setIfNotEmpty(body, "end_date", values["end-date"]);
+  setIfNotEmpty(body, "country", values.country);
+  const includeAnswer = parseBoolish(values["include-answer"]);
+  if (includeAnswer !== undefined) body.include_answer = includeAnswer;
+  const includeRawContent = parseBoolish(values["include-raw-content"]);
+  if (includeRawContent !== undefined) body.include_raw_content = includeRawContent;
+  if (values["include-images"]) body.include_images = true;
+  if (values["include-image-descriptions"]) body.include_image_descriptions = true;
+  if (values["include-favicon"]) body.include_favicon = true;
+  const includeDomains = asArray(values["include-domain"]);
+  const excludeDomains = asArray(values["exclude-domain"]);
+  if (includeDomains.length) body.include_domains = includeDomains;
+  if (excludeDomains.length) body.exclude_domains = excludeDomains;
+  if (values["auto-parameters"]) body.auto_parameters = true;
+  if (values["exact-match"]) body.exact_match = true;
+  return body;
+}
+
+function normalizedFormat(values) {
+  if (values.json) return "json";
+  if (values.pretty) return "pretty-json";
+  return values.format || "markdown";
+}
+
+async function postJSON(config, endpoint, body) {
+  const response = await fetch(`${config.baseURL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(config.timeoutMs),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    // Go 版错误文案带 resp.Status（"401 Unauthorized" 形态），statusText 为空时退回纯数字。
+    const status = response.statusText ? `${response.status} ${response.statusText}` : String(response.status);
+    throw new Error(`Tavily API request failed with status ${status}: ${raw.trim()}`);
+  }
+  return raw;
+}
+
+function stringify(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function firstString(object, ...keys) {
+  for (const key of keys) {
+    if (!object || !(key in object)) continue;
+    const value = stringify(object[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function firstArray(object, ...keys) {
+  for (const key of keys) {
+    if (object && Array.isArray(object[key])) return object[key];
+  }
+  return [];
+}
+
+function writeField(lines, name, value) {
+  if (value) lines.push(`- ${name}: ${value}`);
+}
+
+// 渲染结构与 Go 版逐行对应（空行与 <details> 折叠的位置都参与 diff 验收）。
+function tavilySearchMarkdown(query, value) {
+  const object = value && typeof value === "object" ? value : {};
+  const lines = ["# Tavily Search Results", "", `Query: ${query}`, ""];
+  const answer = firstString(object, "answer");
+  if (answer) {
+    lines.push("## Answer", answer, "");
+  }
+  lines.push("## Results");
+  const results = firstArray(object, "results");
+  if (!results.length) {
+    lines.push("No results found.");
+    return `${lines.join("\n")}\n`;
+  }
+  results.forEach((item, index) => {
+    const result = item && typeof item === "object" ? item : {};
+    const title = firstString(result, "title") || "Untitled";
+    lines.push(`### ${index + 1}. ${title}`);
+    writeField(lines, "URL", firstString(result, "url"));
+    if ("score" in result) writeField(lines, "Score", stringify(result.score));
+    writeField(lines, "Favicon", firstString(result, "favicon"));
+    lines.push("");
+    const content = firstString(result, "content");
+    if (content) lines.push(content, "");
+    const raw = firstString(result, "raw_content");
+    if (raw) {
+      lines.push("<details>", "<summary>Raw content</summary>", "", raw, "", "</details>", "");
+    }
+  });
+  return `${lines.join("\n")}\n`;
+}
+
+function writeOutput(raw, format, markdown) {
+  if (format === "json") {
+    process.stdout.write(`${raw}\n`);
+    return;
+  }
+  if (format === "pretty-json") {
+    try {
+      process.stdout.write(`${JSON.stringify(JSON.parse(raw), null, 2)}\n`);
+    } catch {
+      process.stdout.write(raw);
+    }
+    return;
+  }
+  if (format !== "markdown") throw new Error(`unsupported format ${JSON.stringify(format)}`);
+  process.stdout.write(markdown(JSON.parse(raw)));
+}
+
+async function run(argv) {
+  const commandLine = parseCommandLine(argv);
+  if (!commandLine) return;
+  const { query, values } = commandLine;
+  const config = loadConfig(values);
+  const raw = await postJSON(config, "/search", buildSearchBody(query, values));
+  writeOutput(raw, normalizedFormat(values), (value) => tavilySearchMarkdown(query, value));
+}
+
+run(process.argv.slice(2)).catch((error) => {
+  fail(error.message || String(error));
+});

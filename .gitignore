@@ -1,0 +1,25 @@
+# 密钥与环境
+**/.env
+skills/*/**/.env
+
+# to-spec 过程产物：规格已提炼进 ADR，scratch 不入库
+.scratch/
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# dev 验证数据（冒烟测试每次重建）
+server/dev-data/
+
+# compose.yaml 默认挂载目录（宿主侧的 ~/pi-teacher 与 ~/.pi/agent），含数据库与 API key
+/pi-teacher/
+/pi-agent/
+
+/docs/
+/.claude/
+/AGENTS.md
+/CLAUDE.md
+
+# sbx 重建说明含私有上游地址，仅私有分支保留，开源快照排除
+/skills/sbx/sourcecode/README.md
