@@ -1,4 +1,3 @@
-# 镜像构建上下文：只送进 Dockerfile 真正 COPY 的内容（server/、web/、skills/、docker-entrypoint.sh）。
 .git
 .gitignore
 .scratch
@@ -8,14 +7,13 @@
 **/dev-data
 **/.env
 
-# 文档不进镜像：出厂提示词已收进 server/src/prompts/defaults.ts。
+# 文档
 docs
+doc-for-dev
 
-# 默认挂载目录（compose.yaml 首次启动在仓库旁生成），绝不能打进镜像。
+# 默认挂载目录
 pi-teacher
 pi-agent
-
-# 根目录草稿与说明（*.md 只匹配根目录，skills/*/SKILL.md 不受影响）。
-*.md
+# 构建无关
 Dockerfile
-compose.yaml
+docker-compose.yaml
