@@ -1,7 +1,7 @@
 # Pi Teacher 开发者文档
 
 面向开发者的仓库总览：各目录职责、数据库设计、运行时目录设计与关键机制。
-领域语言（Space / Pi Session / Agents Md / Teach Style / Briefing / Card / Topic 等）以 [`docs/CONTEXT.md`](../docs/CONTEXT.md) 为准，本文与代码里的命名都跟随它。先读懂那一份，再往下看。
+领域语言（Space / Pi Session / Agents Md / Teach Style / Briefing / Card / Topic 等）是贯穿本文与代码的核心术语，命名保持一致。
 
 ## 仓库布局
 
@@ -24,7 +24,7 @@ Express 5 应用，既是 HTTP API 与 SSE 服务，也是 Pi Agent 进程的宿
 | --- | --- |
 | `src/bridge/` | **Pi SDK 桥接层**。`agent-session-wrapper.ts` 包装一次 Agent 会话：准入串行化、空闲 10 分钟回收（固定助教例外，常驻到 SIGTERM）、运行中风格切换的重载；事件流相关文件把 Pi 的内部事件规范化成前端可消费的形状 |
 | `src/session/` | 会话仓储与周边：`repository.ts`（pi_session 表 CRUD、IMMEDIATE 事务预占 id 再建目录）、`session-reader.ts`（读 JSONL 历史）、`title-generator.ts`（首轮后独立发起一次 LLM 调用生成标题，不在会话内走工具）、`attachments.ts` / `models.ts` |
-| `src/tools/` | **Pi 插件与 15 个业务工具**（`card_*` / `topic_*` / `glossary_*` / `review_*` / `md_*` / `file_*`）。`factory.ts` 是注册入口，`context.ts` 每轮实时从数据库读工具开关——闭包快照会得到假开关。签名与可见性矩阵见 `docs/工具定义.md` |
+| `src/tools/` | **Pi 插件与 15 个业务工具**（`card_*` / `topic_*` / `glossary_*` / `review_*` / `md_*` / `file_*`）。`factory.ts` 是注册入口，`context.ts` 每轮实时从数据库读工具开关——闭包快照会得到假开关。签名与可见性见 `factory.ts` 及各工具定义文件 |
 | `src/projection/` | 双向投影：开会话时把 `agents_md` / `teach_style` 模板写成工作目录的 `AGENTS.md` / `style.md`（`agents-md.ts`）；HTTP 出口把内部路径折叠成相对路径（`client-view.ts`，前端永不见绝对路径）；`system-prompt-builder.ts` 合并全局 `USER.md` + 会话 `style.md` 经 `appendSystemPrompt` 注入；`context-inject.ts` 每轮注入待复习数等动态状态（不落 JSONL）；`maintenance-reminder.ts` 按轮次在用户消息末尾追加维护提醒 |
 | `src/prompts/defaults.ts` | **全部出厂提示词的唯一出处**：全局 AGENTS.md、四套 agents_md 模板、教学风格模板、三段基础维护提醒 + 学习精华追加段。调提示词只改这一个文件 |
 | `src/db/` | `schema.ts`（建表 + 触发器 + 幂等迁移）、`seed.ts`（幂等初始化固定 Space、预置模板、全局文件）、`connection.ts` |
