@@ -1,6 +1,10 @@
 # TODO
 
-## 当前阶段：tavily-search Node 重写（仓库 Go 归零）已部署到验证容器，待用户 WebUI 验收
+## 当前阶段：tingwu-transcribe 接入为第五个内置 skill（已实现，待容器验收）
+
+**tingwu-transcribe（2026-09-12）**：决策见 ADR-0042。上游已改版为 skill 形态（`scripts/cli.js` 纯命令行入口 + 零第三方依赖），「必须常驻网关」这一阻塞点消失，**原样接入、一行不改**；接入时仅删除随目录带来的 `.git`。两个已知取舍经用户确认接受：① 登录 Cookie 默认落在 skill 目录内，容器重启 / 升级镜像后需重新设置（Cookie 本来就会过期、失效时 CLI 明确提示 `COOKIE_INVALID`；要跨重启保留可设 `TW_COOKIE_FILE` 指向挂载卷，已写进 deploy.md）；② `server.js` 默认 `0.0.0.0:8787` 无鉴权，但容器未 EXPOSE 该端口且不自启动，风险被容器边界隔离。不走 `user_env` 表——Cookie 需要程序验证后回写，与人工维护的配置表语义不符。验证：宿主与容器内 `cli.js` help / `cookie check`（`COOKIE_MISSING`，退出码 1）/ 假 Cookie 真实打到听悟返回 `CMN.NotLogin` 且不落盘；`.dockerignore` 的 `*.md` 只匹配根目录，`SKILL.md` 与 `references/` 实测完整进镜像。待做：重建镜像 → 更新验证容器 → `verify:remote`（skill 探针是否扩到五个待定）。
+
+## 上一阶段：tavily-search Node 重写（仓库 Go 归零）已部署到验证容器，待用户 WebUI 验收
 
 **tavily-search-node-rewrite（2026-09-12）**：PRD 见 `tavily-search-node-rewrite.md`，决策见 ADR-0041（取代 ADR-0040「tavily-search 保持 Go 不动」一句）。最后一个 Go skill 换成零依赖 Node 单文件（12638 字节，ESM，与 `pullpage` 同范式），`sourcecode/` 整目录删除，**仓库内 `*.go` 归零**。有意的行为变更只有两处：缺 key 报错指向设置页（旧版让用户复制 `.env.example`，与 ADR-0034 相悖且容器里无该文件）、移除 `--env-file`（文档本就明令不要传；实测 Node 24 还会截获脚本后的 `--env-file` 参数并 exit 9，三个 Node skill 一致）。21 项功能直测全过（真 key 真调用：markdown 渲染、`--include-answer` 的 `## Answer` 段、参数在 query 前后、`--json`/`--pretty`、重复 `--include-domain` 真实限定结果、`--include-raw-content` 的 `<details>` 折叠、`.env` 兜底与环境变量优先、非法 timeout / max-results 报错文案与 Go 版一致）。`BUILTIN_USER_ENV` 的 `TAVILY_TIMEOUT` 描述去「Go duration」字样；`SKILL.md` 删 Pi 不解析的 `allowed-tools`；`references/advanced-cli.md` 同步。验证：typecheck 通过、`http-smoke` **522/0/0**（换 octopus / deepseek-normal-latest 后一次过）；镜像重建后 `/app/skills` 由 13M 降到 **4.9M**，备份 117M → `up -d`，`verify:remote` **51 通过 / 0 失败**（四个 skill 全部由真模型在容器内跑通）。代码与文档已随 commit `7dc02b7` 推送到 `origin/main`。浏览器由用户在验证容器（端口 39873）上验收。
 
@@ -100,7 +104,7 @@
 - **FSRS 参数优化**（已定方案）：完全手动触发；后端接口 + 前端按钮；输入 `review_log` 该 Topic 全部序列，输出写回 `topic`；`topic` 需新增 `w` 数组字段（ts-fsrs 权重），目前只有 `request_retention` 与 `maximum_interval`
 - **合并卡**（已定方案，`POST /api/cards/merge` 后端已有）：判据归提示词、动作归工具；FSRS 状态复制 `stability` 最低那张旧卡；前端尚无入口
 - **复习 rubric 细化**：四档边界（尤其 Hard/Good 分界）等有 `review_log` 数据后回头收紧（ADR-0019）
-- **资料获取 skill**：网页抓取已由 `pullpage` 覆盖（ADR-0040）；仍缺 yt-dlp 下载与转录清洗（tingwu 网关需先定部署方式）；子代理只返回一行摘要（ADR-0016）
+- **资料获取 skill**：网页抓取已由 `pullpage` 覆盖（ADR-0040），音视频转写已由 `tingwu-transcribe` 覆盖（ADR-0042）；仍缺 yt-dlp 之类的媒体下载（听悟接收本地文件或 URL，但不负责从视频站抓流）；子代理只返回一行摘要（ADR-0016）
 - **Go 工具仓库**：等出现第一个「Shell 太弱、Node 不合适」的场景再建（ADR-0015）
 - **数据库索引**：等有实际慢查询再加；已知高频查询：`card_schedule.due` 到期、`card.topic_id` 过滤、`topic.name` 唯一、`review_log.card_id` 聚合
 - 移动端布局；`compact` / 思考等级的 UI 入口；Pi Session 重命名后左树即时刷新的细粒度事件

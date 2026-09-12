@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>通义听悟网关</title>
+<style>
+  :root {
+    --primary: #0f766e;          /* 主色：深青绿，避开常见的默认蓝紫 */
+    --primary-light: #ccfbf1;
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --text: #1f2937;
+    --text-dim: #6b7280;
+    --line: #e5e7eb;
+    --danger: #b91c1c;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header h1 small { font-size: 12px; color: var(--text-dim); font-weight: normal; margin-left: 8px; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text-dim); }
+  .badge.ok { color: var(--primary); border-color: var(--primary); background: var(--primary-light); }
+  .badge.bad { color: var(--danger); border-color: #fecaca; background: #fef2f2; cursor: pointer; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+
+  /* 上传区域 */
+  #dropZone {
+    border: 2px dashed #cbd5e1; border-radius: var(--radius);
+    padding: 28px 16px; text-align: center; color: var(--text-dim);
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #dropZone.hover { border-color: var(--primary); background: #f0fdfa; }
+  #dropZone .picked { color: var(--text); font-weight: 600; }
+  .upload-row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .upload-row label { color: var(--text-dim); font-size: 13px; }
+  .upload-row input[type=text], .upload-row select {
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 14px; background: #fff; color: var(--text);
+  }
+  .upload-row input[type=text] { flex: 1; min-width: 160px; }
+  button { border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; background: var(--primary); color: #fff; }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--primary); border: 1px solid var(--line); }
+  #progress { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; margin-top: 12px; display: none; }
+  #progress > div { height: 100%; width: 0; background: var(--primary); transition: width .2s; }
+
+  /* 任务列表 */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--text-dim); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 12px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .name { font-weight: 600; }
+  .preview { font-size: 12px; color: var(--text-dim); max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status-tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; }
+  .status-done { background: var(--primary-light); color: var(--primary); }
+  .status-doing { background: #fef9c3; color: #854d0e; }
+  .status-fail { background: #fee2e2; color: var(--danger); }
+  .ops { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ops button { padding: 4px 10px; font-size: 12px; }
+  .empty { text-align: center; color: var(--text-dim); padding: 28px 0; }
+
+  /* 模态框 */
+  .modal-mask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  .modal-mask.show { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 720px; max-height: 84vh; display: flex; flex-direction: column; }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .modal-head b { font-size: 15px; }
+  .modal-close { background: none; color: var(--text-dim); font-size: 18px; padding: 2px 8px; }
+  .modal-body { padding: 16px 18px; overflow-y: auto; white-space: pre-wrap; }
+  .para { padding: 10px 12px; border-left: 3px solid var(--primary-light); margin-bottom: 10px; background: #fafbfc; border-radius: 0 8px 8px 0; }
+  .para .meta { font-size: 12px; color: var(--text-dim); margin-bottom: 2px; }
+  .modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+  textarea#cookieInput { width: 100%; height: 130px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.5 monospace; resize: vertical; }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 9px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 20; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>通义听悟网关 <small>tingwu-gateway</small></h1>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="cookieBadge" class="badge">检查中…</span>
+      <button class="ghost" id="updateCookieBtn">更新 Cookie</button>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>上传转写</h2>
+    <div id="dropZone" title="点击或拖入音/视频文件">
+      <div id="dropText">拖入音频 / 视频文件，或点击选择<br><span style="font-size:12px">支持 mp3 / wav / m4a / mp4 / mov 等</span></div>
+      <input id="fileInput" type="file" hidden>
+    </div>
+    <div class="upload-row">
+      <label>显示名</label>
+      <input id="showName" type="text" placeholder="默认取文件名">
+      <label>说话人</label>
+      <select id="roleSplitNum">
+        <option value="0">不分离</option>
+        <option value="2" selected>2 人</option>
+        <option value="3">3 人</option>
+        <option value="4">4 人</option>
+        <option value="5">5 人</option>
+      </select>
+      <button id="uploadBtn">开始转写</button>
+    </div>
+    <div id="progress"><div></div></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <h2 style="margin:0">转写任务 <span id="totalHint" style="font-size:12px;color:var(--text-dim);font-weight:normal"></span></h2>
+      <button class="ghost" id="refreshBtn">刷新</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th style="width:44%">名称</th><th>状态</th><th>时长</th><th>字数</th><th>时间</th><th style="width:26%">操作</th></tr>
+      </thead>
+      <tbody id="taskList"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 结果模态框 -->
+<div class="modal-mask" id="resultMask">
+  <div class="modal">
+    <div class="modal-head">
+      <b id="resultTitle">转写结果</b>
+      <button class="modal-close" data-close="resultMask">×</button>
+    </div>
+    <div class="modal-body" id="resultBody"></div>
+    <div class="modal-foot">
+      <button class="ghost" id="copyTextBtn">复制全文</button>
+      <button class="ghost" id="downloadSrtBtn">下载 SRT</button>
+      <button class="ghost" id="downloadTxtBtn">下载 TXT</button>
+    </div>
+  </div>
+</div>
+
+<!-- cookie 更新模态框 -->
+<div class="modal-mask" id="cookieMask">
+  <div class="modal">
+    <div class="modal-head">
+      <b>更新登录 Cookie</b>
+      <button class="modal-close" data-close="cookieMask">×</button>
+    </div>
+    <div class="modal-body" style="white-space:normal">
+      <p style="margin-bottom:8px;color:var(--text-dim)">在浏览器开发者工具的请求 Headers 里复制完整的 Cookie 值（从第一个 name=value 到最后一个值），不要复制 <code>cookie:</code> 前缀。</p>
+      <textarea id="cookieInput" placeholder="account_info_switch=close; login_current_pk=...; hssid=...; ..."></textarea>
+    </div>
+    <div class="modal-foot"><button id="saveCookieBtn">验证并更新</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// 全局状态：当前查看结果的任务，供模态框底部按钮使用
+let currentResultTask = null;
+let pollTimer = null;
+
+const $ = (id) => document.getElementById(id);
+const statusText = { 0: '已完成', 1: '转写中' };
+
+function showToast(message) {
+  const toast = $('toast');
+  toast.textContent = message;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 2600);
+}
+
+// 毫秒时长 -> "分:秒"
+function formatDuration(ms) {
+  if (ms == null) return '-';
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatTime(ms) { return new Date(ms).toLocaleString('zh-CN', { hour12: false }); }
+
+async function api(path, options) {
+  const resp = await fetch(path, options);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const error = new Error(data.error || `请求失败 HTTP ${resp.status}`);
+    error.status = resp.status;
+    error.code = data.code;
+    throw error;
+  }
+  return data;
+}
+
+function isCookieError(error) {
+  return error?.status === 401 || ['COOKIE_INVALID', 'COOKIE_MISSING'].includes(error?.code);
+}
+
+let cookieInvalid = false;
+
+function showCookieUpdate() { openModal('cookieMask'); }
+
+function setCookieExpired(message = '登录已过期，请更新 Cookie') {
+  cookieInvalid = true;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  const badge = $('cookieBadge');
+  badge.textContent = message;
+  badge.className = 'badge bad';
+  badge.onclick = showCookieUpdate;
+  $('uploadBtn').disabled = true;
+}
+
+async function loadHealth({ validate = true } = {}) {
+  const badge = $('cookieBadge');
+  try {
+    const health = await api('/health');
+    const state = health.cookieState || {};
+    if (!health.cookieLoaded || state.status === 'missing') {
+      setCookieExpired('Cookie 未配置，点击更新');
+      return;
+    }
+    if (state.status === 'invalid') {
+      setCookieExpired('登录已过期，点击更新');
+      return;
+    }
+    if (validate) {
+      const check = await api('/cookie/check');
+      cookieInvalid = false;
+      badge.textContent = `Cookie 有效 · ${check.totalTranscripts} 个任务`;
+    } else {
+      badge.textContent = state.status === 'unknown' ? 'Cookie 待验证' : 'Cookie 有效';
+    }
+    badge.className = 'badge ok';
+    badge.onclick = showCookieUpdate;
+    $('uploadBtn').disabled = false;
+  } catch (error) {
+    if (isCookieError(error)) {
+      setCookieExpired('登录已过期，点击更新');
+    } else {
+      badge.textContent = `网关异常：${error.message}`;
+      badge.className = 'badge bad';
+    }
+  }
+}
+
+// 渲染任务列表；存在转写中任务时启动轮询自动刷新
+async function loadList() {
+  const tbody = $('taskList');
+  if (cookieInvalid) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">登录已过期，请先更新 Cookie</td></tr>';
+    return;
+  }
+  try {
+    const data = await api('/transcripts?pageSize=20');
+    $('totalHint').textContent = `共 ${data.total} 条`;
+    if (!data.data?.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">还没有任务，先上传一个文件吧</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.data.map((item) => {
+      const status = item.status === 0
+        ? '<span class="status-tag status-done">已完成</span>'
+        : item.status === 1
+          ? '<span class="status-tag status-doing">转写中</span>'
+          : `<span class="status-tag status-fail">状态 ${item.status}</span>`;
+      const preview = (item.resultPreview || []).join('');
+      const disabled = item.status === 0 ? '' : 'disabled';
+      return `<tr>
+        <td><div class="name">${escapeHtml(item.tag?.showName ?? item.transId)}</div>
+            <div class="preview" title="${escapeHtml(preview)}">${escapeHtml(preview)}</div></td>
+        <td>${status}</td>
+        <td>${formatDuration(item.duration)}</td>
+        <td>${item.wordCount ?? '-'}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${formatTime(item.showTime)}</td>
+        <td><div class="ops">
+          <button class="ghost" data-act="view" data-id="${item.transId}" data-name="${escapeHtml(item.tag?.showName ?? '')}" ${disabled}>结果</button>
+          <button class="ghost" data-act="srt" data-id="${item.transId}" data-name="${escapeHtml(item.tag?.showName ?? '')}" ${disabled}>SRT</button>
+          <button class="ghost" data-act="txt" data-id="${item.transId}" data-name="${escapeHtml(item.tag?.showName ?? '')}" ${disabled}>TXT</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+    const hasActive = data.data.some((item) => item.status === 1);
+    if (hasActive && !pollTimer) {
+      pollTimer = setTimeout(() => { pollTimer = null; loadList(); }, 3000);
+    }
+  } catch (error) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message)}</td></tr>`;
+    if (isCookieError(error)) {
+      setCookieExpired('登录已过期，点击更新');
+    }
+  }
+}
+
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+// ---- 上传 ----
+
+const dropZone = $('dropZone');
+const fileInput = $('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) {
+    $('dropText').innerHTML = `<span class="picked">${escapeHtml(fileInput.files[0].name)}</span>
+      <span style="font-size:12px;color:var(--text-dim)">（${(fileInput.files[0].size / 1048576).toFixed(1)} MB，点击可重新选择）</span>`;
+    if (!$('showName').value) $('showName').value = fileInput.files[0].name.replace(/\.[^.]+$/, '');
+  }
+});
+['dragover', 'dragenter'].forEach((event) => dropZone.addEventListener(event, (e) => {
+  e.preventDefault(); dropZone.classList.add('hover');
+}));
+['dragleave', 'drop'].forEach((event) => dropZone.addEventListener(event, (e) => {
+  e.preventDefault(); dropZone.classList.remove('hover');
+}));
+dropZone.addEventListener('drop', (e) => {
+  if (e.dataTransfer.files[0]) {
+    fileInput.files = e.dataTransfer.files;
+    fileInput.dispatchEvent(new Event('change'));
+  }
+});
+
+// 用 XHR 上传以获得进度回调（fetch 的 upload progress 支持不佳）
+$('uploadBtn').addEventListener('click', () => {
+  if (cookieInvalid) { showCookieUpdate(); showToast('登录已过期，请先更新 Cookie'); return; }
+  const file = fileInput.files[0];
+  if (!file) { showToast('请先选择文件'); return; }
+  const form = new FormData();
+  form.append('file', file);
+  if ($('showName').value.trim()) form.append('showName', $('showName').value.trim());
+  form.append('roleSplitNum', $('roleSplitNum').value);
+
+  const button = $('uploadBtn');
+  const progress = $('progress');
+  button.disabled = true;
+  button.textContent = '上传中…';
+  progress.style.display = 'block';
+  progress.firstElementChild.style.width = '0';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/transcribe');
+  xhr.upload.addEventListener('progress', (e) => {
+    if (e.lengthComputable) {
+      const percent = Math.round((e.loaded / e.total) * 100);
+      progress.firstElementChild.style.width = `${percent}%`;
+      button.textContent = `上传中 ${percent}%`;
+    }
+  });
+  xhr.addEventListener('load', () => {
+    button.disabled = false;
+    button.textContent = '开始转写';
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch { /* 非 JSON 响应按错误处理 */ }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      progress.firstElementChild.style.width = '100%';
+      setTimeout(() => { progress.style.display = 'none'; }, 800);
+      showToast(`已提交转写：${data.showName ?? ''}`);
+      loadList();
+    } else if (xhr.status === 401) {
+      progress.style.display = 'none';
+      setCookieExpired('登录已过期，点击更新');
+      openModal('cookieMask');
+      showToast(data.error || '请先更新 Cookie');
+    } else {
+      progress.style.display = 'none';
+      showToast(data.error || `上传失败 HTTP ${xhr.status}`);
+    }
+  });
+  xhr.addEventListener('error', () => {
+    button.disabled = false;
+    button.textContent = '开始转写';
+    progress.style.display = 'none';
+    showToast('网络错误，上传失败');
+  });
+  xhr.send(form);
+});
+
+// ---- 任务操作 ----
+
+$('taskList').addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-act]');
+  if (!button) return;
+  const { act, id, name } = button.dataset;
+  if (button.disabled) return;
+  if (act === 'view') await viewResult(id, name);
+  if (act === 'txt') window.open(`/transcripts/${id}/txt?name=${encodeURIComponent(name || id)}`);
+  if (act === 'srt') await downloadSrt(id, name);
+});
+
+async function viewResult(transId, showName) {
+  const mask = $('resultMask');
+  $('resultTitle').textContent = showName || transId;
+  $('resultBody').textContent = '加载中…';
+  openModal('resultMask');
+  try {
+    const data = await api(`/transcripts/${transId}/result`);
+    currentResultTask = { transId, showName, data };
+    const paragraphs = data.paragraphs?.length
+      ? data.paragraphs.map((p) => `<div class="para"><div class="meta">说话人 ${p.speaker ?? '?'} · ${formatDuration(p.startTimeMs)}</div>${escapeHtml(p.text)}</div>`).join('')
+      : `<div style="color:var(--text-dim)">暂无解析结果${data.parseFailed ? '（result 结构解析失败，原始数据见 rawResult）' : ''}</div>`;
+    $('resultBody').innerHTML = paragraphs +
+      `<div style="font-size:12px;color:var(--text-dim);margin-top:8px">时长 ${formatDuration(data.duration)} · ${data.wordCount ?? '-'} 字</div>`;
+  } catch (error) {
+    if (isCookieError(error)) setCookieExpired('登录已过期，点击更新');
+    $('resultBody').textContent = `加载失败：${error.message}`;
+  }
+}
+
+async function downloadSrt(transId, showName) {
+  try {
+    const resp = await fetch(`/transcripts/${transId}/export`, { method: 'POST' });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      const error = new Error(data.error || `导出失败 HTTP ${resp.status}`);
+      error.status = resp.status;
+      error.code = data.code;
+      throw error;
+    }
+    const blob = await resp.blob();
+    triggerDownload(blob, `${showName || transId}.srt`);
+    showToast('SRT 已开始下载');
+  } catch (error) {
+    if (isCookieError(error)) setCookieExpired('登录已过期，点击更新');
+    showToast(error.message);
+  }
+}
+
+function triggerDownload(blob, filename) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+$('copyTextBtn').addEventListener('click', async () => {
+  if (!currentResultTask) return;
+  await navigator.clipboard.writeText(currentResultTask.data.text || '');
+  showToast('全文已复制到剪贴板');
+});
+$('downloadSrtBtn').addEventListener('click', () => {
+  if (currentResultTask) downloadSrt(currentResultTask.transId, currentResultTask.showName);
+});
+$('downloadTxtBtn').addEventListener('click', () => {
+  if (!currentResultTask) return;
+  const { transId, showName } = currentResultTask;
+  window.open(`/transcripts/${transId}/txt?name=${encodeURIComponent(showName || transId)}`);
+});
+
+// ---- cookie 更新 ----
+
+function openModal(id) { $(id).classList.add('show'); }
+document.querySelectorAll('[data-close]').forEach((button) =>
+  button.addEventListener('click', () => $(button.dataset.close).classList.remove('show')));
+// 点遮罩关闭
+document.querySelectorAll('.modal-mask').forEach((mask) =>
+  mask.addEventListener('click', (e) => { if (e.target === mask) mask.classList.remove('show'); }));
+
+$('updateCookieBtn').addEventListener('click', showCookieUpdate);
+
+$('saveCookieBtn').addEventListener('click', async () => {
+  const cookieValue = $('cookieInput').value.trim();
+  if (!cookieValue) { showToast('请先粘贴 Cookie 值'); return; }
+  const button = $('saveCookieBtn');
+  button.disabled = true;
+  button.textContent = '验证中…';
+  try {
+    // 后端会用这份候选 Cookie 对听悟执行真实只读请求，验证通过后才写入并返回列表总数。
+    const data = await api('/cookie', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: cookieValue,
+    });
+    cookieInvalid = false;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    $('cookieMask').classList.remove('show');
+    $('cookieInput').value = '';
+    $('cookieBadge').textContent = `Cookie 有效 · ${data.totalTranscripts} 个任务`;
+    $('cookieBadge').className = 'badge ok';
+    $('cookieBadge').onclick = showCookieUpdate;
+    $('uploadBtn').disabled = false;
+    showToast(`Cookie 已更新，已读取 ${data.totalTranscripts} 个任务`);
+    // 更新成功后立即重新读取真实列表
+    await loadList();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '验证并更新';
+  }
+});
+
+$('refreshBtn').addEventListener('click', () => { loadHealth(); loadList(); });
+
+loadHealth();
+loadList();
+</script>
+</body>
+</html>

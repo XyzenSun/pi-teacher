@@ -88,4 +88,4 @@ ADR-0027 的大结论（能力扩展只有 skill 和插件两个载体、不用 
 
 ### tingwu 语音识别一并接入
 
-本轮不做。它不是 skill 而是需要常驻的本地 REST 网关（端口 8787、靠手动维护登录 Cookie），得先决定怎么部署（compose 加 service？Cookie 怎么续）再写调用它的 skill，与本轮三个「放进目录就能用」的 skill 不是一个量级。
+本轮不做。它不是 skill 而是需要常驻的本地 REST 网关（端口 8787、靠手动维护登录 Cookie），得先决定怎么部署（compose 加 service？Cookie 怎么续）再写调用它的 skill，与本轮三个「放进目录就能用」的 skill 不是一个量级。（2026-09-12 补：上游改版后新增了 `scripts/cli.js` 纯命令行入口，不必起服务，已按 ADR-0042 原样接入为第五个内置 skill。）

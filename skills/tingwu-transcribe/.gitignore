@@ -1,0 +1,7 @@
+# 登录凭证，禁止提交
+cookie.txt
+
+# 本地运行日志与临时文件
+*.log
+.DS_Store
+node_modules/
