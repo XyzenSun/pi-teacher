@@ -16,7 +16,17 @@ import { HttpError } from "../routes/http.ts";
 export const BUILTIN_USER_ENV = [
   { key: "TAVILY_API_KEY", description: "Tavily 搜索 API Key" },
   { key: "TAVILY_BASE_URL", description: "Tavily API 地址，默认 https://api.tavily.com" },
-  { key: "TAVILY_TIMEOUT", description: "Tavily 请求超时，Go duration 写法，如 60s" },
+  { key: "TAVILY_TIMEOUT", description: "Tavily 请求超时，如 60s" },
+  { key: "EXA_API_KEY", description: "Exa 搜索 / 抓取 API Key" },
+  { key: "EXA_BASE_URL", description: "Exa API 地址（可选），默认 https://api.exa.ai" },
+  { key: "EXA_TIMEOUT", description: "Exa 请求超时，如 60s" },
+  { key: "FIRECRAWL_API_KEY", description: "Firecrawl 抓取 API Key" },
+  { key: "FIRECRAWL_BASE_URL", description: "Firecrawl API 地址（可选），默认 https://api.firecrawl.dev" },
+  { key: "JINA_API_KEY", description: "Jina Reader API Key" },
+  { key: "JINA_BASE_URL", description: "Jina Reader 地址（可选），默认 https://r.jina.ai" },
+  { key: "DAYTONA_API_KEY", description: "sbx 云沙箱的 Daytona API Key" },
+  { key: "E2B_API_KEY", description: "sbx 云沙箱的 E2B API Key" },
+  { key: "CODESANDBOX_API_KEY", description: "sbx 云沙箱的 CodeSandbox API Key" },
 ] as const;
 
 /** 会改变后端进程自身或动态链接器行为的变量：设错了服务本身就起不来，不允许从界面设置。 */

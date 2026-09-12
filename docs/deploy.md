@@ -15,7 +15,7 @@
 
 **skills** 就是 `HOST_PI_AGENT_DIR/skills/`，随 `~/.pi/agent` 一起挂进容器，可写：
 
-- **内置 skill**（仓库 `skills/`，当前只有 `tavily-search`）随镜像走。容器每次启动，入口脚本把镜像里的每个内置 skill**先删同名目录再整目录复制**进 `~/.pi/agent/skills`，所以升级镜像就等于升级了内置 skill。内置 skill 的目录归镜像管，直接改它会在下次启动被覆盖回来；想定制就复制一份改个名字。
+- **内置 skill**（仓库 `skills/`：`tavily-search` 搜索、`exa-search` 搜索与问答、`pullpage` 单 URL 抓取、`sbx` 云沙箱）随镜像走。容器每次启动，入口脚本把镜像里的每个内置 skill**先删同名目录再整目录复制**进 `~/.pi/agent/skills`，所以升级镜像就等于升级了内置 skill。内置 skill 的目录归镜像管，直接改它会在下次启动被覆盖回来；想定制就复制一份改个名字。
 - **你自己的 skill** 往 `HOST_PI_AGENT_DIR/skills/` 里放目录即可（每个子目录一个 `SKILL.md`），入口脚本不碰内置以外的任何目录；`docker compose restart` 后 Pi 会在下次开会话时发现它。
 
 其余变量：

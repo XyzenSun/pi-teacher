@@ -193,19 +193,27 @@ async function main(): Promise<void> {
     const tools = (await api("POST", `/api/conversations/${id}/command`, { type: "get_tools" })).json.data;
     check("会话带 Pi 默认 bash / read 与业务工具", ["bash", "read", "card_propose", "md_get_outline"].every((name) => tools.some((tool: any) => tool.name === name && tool.active)));
     // skill 挂载验收：模型只能从系统提示词的 <available_skills> 得知 skill 在哪，命令真跑出来才算挂对了。
-    const skillPrompts = [
-      "请实际执行，不要只用文字描述：1）用 read 工具读取 available_skills 里名为 tavily-search 的 skill 的 SKILL.md；2）用 bash 工具执行该 skill 目录下的 scripts/tavily-search --help（用绝对路径，不要传 --env-file）；3）把命令输出的第一行原样回复给我。不要执行搜索，不要调用其他工具。",
-      "上一轮没有真正运行命令。请现在就用 bash 工具（不是文字描述）执行 available_skills 中 tavily-search 的 location 所在目录下的 scripts/tavily-search --help，然后把输出第一行原样回复给我。",
-    ];
-    let bashResultsMentioningTavily: ContextMessage[] = [];
-    for (const [attempt, message] of skillPrompts.entries()) {
+    // 一轮 prompt 打包四个内置 skill 的探针命令，控制真模型轮次成本：
+    //   tavily-search --help（成功输出）、pullpage 无 key 报错（Node 脚本可执行 + 缺 key 文案）、
+    //   exa-search --help（成功输出）、sbx --version（bundle 可执行）。
+    const skillProbePrompt = "请依次实际执行以下四条 bash 命令（用绝对路径，不要只用文字描述，不要执行搜索或创建沙箱），每条命令的完整输出都原样回复给我：1）available_skills 里 tavily-search 的 location 所在目录下的 scripts/tavily-search --help；2）available_skills 里 pullpage 的 location 所在目录下的 scripts/pullpage --url https://example.com；3）available_skills 里 exa-search 的 location 所在目录下的 scripts/exa-search --help；4）available_skills 里 sbx 的 location 所在目录下的 scripts/sbx --version。";
+    const skillRetryPrompt = "上一轮没有真正运行全部命令。请现在就用 bash 工具（不是文字描述）依次执行上面四条命令，并把每条命令的输出原样回复给我。";
+    let skillBashResults: ContextMessage[] = [];
+    let skillBashText = "";
+    // 四个探针各有唯一特征串；模型可能一条 bash 跑完四条命令，所以按特征串判断而不是按 toolResult 条数。
+    const skillProbesSatisfied = () => /search <query>/i.test(skillBashText) && /缺少 TAVILY_API_KEY/.test(skillBashText)
+      && /exa-search search <query>/.test(skillBashText) && /\d+\.\d+\.\d+/.test(skillBashText);
+    for (const [attempt, message] of [skillProbePrompt, skillRetryPrompt].entries()) {
       const messages = await prompt(id, events, message);
-      bashResultsMentioningTavily = messages.filter((entry) => entry.role === "toolResult" && entry.toolName === "bash" && /tavily/i.test(textOf(entry.content)));
-      if (bashResultsMentioningTavily.length) break;
-      console.log(`  - 第 ${attempt + 1} 轮模型没有真正执行命令，再提示一次`);
+      skillBashResults = [...skillBashResults, ...messages.filter((entry) => entry.role === "toolResult" && entry.toolName === "bash")];
+      skillBashText = skillBashResults.map((entry) => textOf(entry.content)).join("\n");
+      if (skillProbesSatisfied()) break;
+      console.log(`  - 第 ${attempt + 1} 轮模型没有跑全四条命令，再提示一次`);
     }
-    check("bash 里真的跑出了 tavily-search --help（skill 目录挂载可用）", bashResultsMentioningTavily.length > 0);
-    check("--help 的输出不是报错", bashResultsMentioningTavily.some((entry) => !(entry as { isError?: boolean }).isError && /search <query>/i.test(textOf(entry.content))));
+    check("bash 里真的跑出了 tavily-search --help（skill 目录挂载可用）", /search <query>/i.test(skillBashText));
+    check("pullpage 可执行且缺 key 文案指向设置页", /缺少 TAVILY_API_KEY/.test(skillBashText) && /用户环境变量/.test(skillBashText));
+    check("exa-search --help 正常输出", /exa-search search <query>/.test(skillBashText));
+    check("sbx --version 输出版本号", /\d+\.\d+\.\d+/.test(skillBashText));
     for (const type of ["agent_start", "message_start", "message_end", "tool_execution_start", "tool_execution_end", "agent_settled", "prompt_done"]) {
       check(`SSE 收到 ${type}`, events.some((event) => event.type === type));
     }
@@ -215,7 +223,12 @@ async function main(): Promise<void> {
     console.log("\n[4] 用户环境变量与前端");
     const userEnv = (await api("GET", "/api/config/user-env")).json;
     // 值按 ADR-0034 明文回显，这里只看 key 与标记，绝不打印值。
-    check("user-env 列出内置的 TAVILY_* 项", ["TAVILY_API_KEY", "TAVILY_BASE_URL", "TAVILY_TIMEOUT"].every((key) => userEnv.items.some((item: any) => item.key === key && item.builtin === true && typeof item.configured === "boolean")));
+    check("user-env 列出内置 skill 变量", [
+      "TAVILY_API_KEY", "TAVILY_BASE_URL", "TAVILY_TIMEOUT",
+      "EXA_API_KEY", "EXA_BASE_URL", "EXA_TIMEOUT",
+      "FIRECRAWL_API_KEY", "FIRECRAWL_BASE_URL", "JINA_API_KEY", "JINA_BASE_URL",
+      "DAYTONA_API_KEY", "E2B_API_KEY", "CODESANDBOX_API_KEY",
+    ].every((key) => userEnv.items.some((item: any) => item.key === key && item.builtin === true && typeof item.configured === "boolean")));
     check("受保护变量名被拒", (await api("PATCH", "/api/config/user-env", { PI_TEACHER_HOME: "/tmp/x" })).status === 400);
     for (const spaPath of ["/", "/app", "/app/settings?tab=advanced", `/app/c/${id}/help`]) {
       const page = await fetch(`${baseUrl}${spaPath}`, { headers: { Cookie: cookie } });

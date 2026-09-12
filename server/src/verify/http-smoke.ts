@@ -697,7 +697,11 @@ async function main(): Promise<void> {
     const envTimeout = `${randomInt(101, 899)}s`;
     result = await api("GET", "/api/config/user-env");
     check("用户环境变量列表带内置项", result.status === 200 && Array.isArray(result.json.items)
-      && ["TAVILY_API_KEY", "TAVILY_BASE_URL", "TAVILY_TIMEOUT"].every((key) => result.json.items.some((item: any) => item.key === key && item.builtin === true)));
+      && ["TAVILY_API_KEY", "TAVILY_BASE_URL", "TAVILY_TIMEOUT",
+        "EXA_API_KEY", "EXA_BASE_URL", "EXA_TIMEOUT",
+        "FIRECRAWL_API_KEY", "FIRECRAWL_BASE_URL", "JINA_API_KEY", "JINA_BASE_URL",
+        "DAYTONA_API_KEY", "E2B_API_KEY", "CODESANDBOX_API_KEY",
+      ].every((key) => result.json.items.some((item: any) => item.key === key && item.builtin === true)));
     check("未设置的内置项 configured=false 且无 value", result.json.items.filter((item: any) => item.builtin && !item.configured)
       .every((item: any) => !Object.prototype.hasOwnProperty.call(item, "value")));
     check("PATCH 拒绝空对象", (await api("PATCH", "/api/config/user-env", {})).status === 400);

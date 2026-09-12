@@ -1,6 +1,14 @@
 # TODO
 
-## 当前阶段：资料归档与学习精华已实现并部署到验证容器，待用户 WebUI 验收
+## 当前阶段：tavily-search Node 重写（仓库 Go 归零）已实现，待容器验收
+
+**tavily-search-node-rewrite（2026-09-12）**：PRD 见 `tavily-search-node-rewrite.md`，决策见 ADR-0041（取代 ADR-0040「tavily-search 保持 Go 不动」一句）。最后一个 Go skill 换成零依赖 Node 单文件（12638 字节，ESM，与 `pullpage` 同范式），`sourcecode/` 整目录删除，**仓库内 `*.go` 归零**。有意的行为变更只有两处：缺 key 报错指向设置页（旧版让用户复制 `.env.example`，与 ADR-0034 相悖且容器里无该文件）、移除 `--env-file`（文档本就明令不要传；实测 Node 24 还会截获脚本后的 `--env-file` 参数并 exit 9，三个 Node skill 一致）。21 项功能直测全过（真 key 真调用：markdown 渲染、`--include-answer` 的 `## Answer` 段、参数在 query 前后、`--json`/`--pretty`、重复 `--include-domain` 真实限定结果、`--include-raw-content` 的 `<details>` 折叠、`.env` 兜底与环境变量优先、非法 timeout / max-results 报错文案与 Go 版一致）。`BUILTIN_USER_ENV` 的 `TAVILY_TIMEOUT` 描述去「Go duration」字样；`SKILL.md` 删 Pi 不解析的 `allowed-tools`；`references/advanced-cli.md` 同步。typecheck 通过。容器验收（重建镜像 → `verify:remote`）进行中。
+
+## 上一阶段：内置 skill 接入（pullpage / exa-search / sbx）已部署到验证容器，待用户 WebUI 验收
+
+**skills-integration（2026-09-12）**：PRD 见 `skills-integration.md`，决策见 ADR-0040。`skills/` 从 1 个扩到 4 个：`pullpage`（单 URL 抓取，四家自动回退）与 `exa-search`（Exa 搜索 / 问答）由上游 Go 重写为**零依赖 Node 单文件**（复用镜像 Node 24，不装 Go 工具链、不存编译产物；`pullpage` 上游只读 `.env` 不读环境变量，本就必须改才能配合 ADR-0034），`sbx`（三家云沙箱）以 esbuild 4.4M 单文件分发（`npm i` 445M、`npx` 首拉 286 秒且缓存不持久，均否决）。沙箱载体由「插件」（ADR-0015 / 0027）改为 skill。`BUILTIN_USER_ENV` 新增 10 项，`EXA_*` 等共用变量按服务命名；`pullpage` 反代变量统一 `*_BASE_URL`。提示词不动——Pi 自动把 `SKILL.md` 的 name / description 注入 `<available_skills>`。验证：后端 typecheck 通过、`http-smoke` 522/0/0、宿主机直测全过（缺 key 文案指向设置页、环境变量优先、假 key 打到平台 401、`--provider all` 与布尔参数正确）；镜像重建后按 `deploy.md` 停止 → 备份 112M → `up -d` 更新验证容器（`pi-teacher-verify`，端口 39873），entrypoint 同步四个内置 skill 且用户自建 skill 未被触碰、`.env` 未进镜像，`verify:remote` **51 通过、0 失败**（含真模型在容器里跑通四个 skill 命令）。`外部资源/` 三个原目录已删（tingwu 保留），删前 tar 归档到宿主机 `/tmp`。**本阶段尚未 commit**；浏览器由用户在该容器上验收。
+
+## 上一阶段：资料归档与学习精华已部署到验证容器，待用户 WebUI 验收
 
 **materials-and-learning-essence（2026-09-11）**：PRD 见 `materials-and-learning-essence.md`，决策见 ADR-0039。全局资料分流规范、学习专属空 `essence/` 与同轮提醒、第四段可编辑文案、卡片来源字段移除及旧库迁移均已落地；代码与根 `CLAUDE.md` 审查通过。`http-smoke` 的自动标题 payload 误判已修正，完整重跑 **522 通过、0 失败、0 跳过**，后端 typecheck 同轮通过。`verify` 本次 27 通过、1 失败（模型把全局偏好写进会话文件），按用户决定不再追测，保留失败记录，不记为通过。ADR-0033–0039 与 Docker 部署已随 commit `97dd87c` 推送到 `origin/main`；镜像 `pi-teacher:local` 已重建，隔离验证容器（`pi-teacher-verify`，端口 39873）按 `deploy.md` 流程停止 → 备份 → `up -d` 更新：旧库 `card.source_essence_path` 已自动删列，账号、会话、`user_env` 保留，`verify:remote` **49 通过、0 失败**（含真模型跑 skill）。浏览器由用户在该容器上验收。
 
@@ -92,7 +100,7 @@
 - **FSRS 参数优化**（已定方案）：完全手动触发；后端接口 + 前端按钮；输入 `review_log` 该 Topic 全部序列，输出写回 `topic`；`topic` 需新增 `w` 数组字段（ts-fsrs 权重），目前只有 `request_retention` 与 `maximum_interval`
 - **合并卡**（已定方案，`POST /api/cards/merge` 后端已有）：判据归提示词、动作归工具；FSRS 状态复制 `stability` 最低那张旧卡；前端尚无入口
 - **复习 rubric 细化**：四档边界（尤其 Hard/Good 分界）等有 `review_log` 数据后回头收紧（ADR-0019）
-- **资料获取 skill**：yt-dlp 下载、网页抓取、转录清洗；子代理只返回一行摘要（ADR-0016）
+- **资料获取 skill**：网页抓取已由 `pullpage` 覆盖（ADR-0040）；仍缺 yt-dlp 下载与转录清洗（tingwu 网关需先定部署方式）；子代理只返回一行摘要（ADR-0016）
 - **Go 工具仓库**：等出现第一个「Shell 太弱、Node 不合适」的场景再建（ADR-0015）
 - **数据库索引**：等有实际慢查询再加；已知高频查询：`card_schedule.due` 到期、`card.topic_id` 过滤、`topic.name` 唯一、`review_log.card_id` 聚合
 - 移动端布局；`compact` / 思考等级的 UI 入口；Pi Session 重命名后左树即时刷新的细粒度事件
@@ -160,4 +168,4 @@ PRD 见 `frontend-webui-mvp.md`。后端按 ADR-0030 破坏性重建（`space �
 
 ## 待做（下一阶段候选，未排期）
 
-- 沙箱插件、生图 skill
+- 生图 skill（沙箱已于 2026-09-12 以 `sbx` skill 接入，见 ADR-0040）

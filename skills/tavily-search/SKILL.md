@@ -1,7 +1,6 @@
 ---
 name: tavily-search
 description: 使用tavily进行搜索，Tavily搜索的特点为：返回内容较完整、结果较杂乱(信源混合官方页面、博客、论坛和二手文章)。 适合搜索新闻、一般事实、初步资料收集。当环境中有其他搜索工具时，应结合搜索工具的特点使用及用户要求。当需要网络搜索时，可考虑调用此SKiLL
-allowed-tools: Bash(./scripts/tavily-search *)
 ---
 
 # Tavily Search
@@ -14,7 +13,7 @@ allowed-tools: Bash(./scripts/tavily-search *)
 ## 密钥配置
 
 `TAVILY_API_KEY` / `TAVILY_BASE_URL` / `TAVILY_TIMEOUT` 由 Pi Teacher 后端作为环境变量注入到命令进程，
-命令**不要**带 `--env-file`，也不要去找任何配置文件。
+不要去找任何配置文件。
 命令因缺少 key 报错时，直接告诉用户：到「系统设置 → 高级配置 → 用户环境变量」填写 `TAVILY_API_KEY`，保存后立即生效，无需重开对话；不要自行尝试其他路径或猜测密钥。
 
 默认输出 Markdown，适合快速获取搜索结果、答案摘要和可引用来源。

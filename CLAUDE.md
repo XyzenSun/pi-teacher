@@ -32,7 +32,7 @@ pi-teacher/
     deploy.md                   ← Docker 部署：挂载变量、内置 skill 覆盖规则、升级、备份、常见错误
   Dockerfile / docker-entrypoint.sh / compose.yaml
                                 ← 容器内完全按 Pi 约定（~/pi-teacher、~/.pi/agent、~/.pi/agent/skills）；宿主路径由 HOST_* 变量决定，默认 ./pi-teacher 与 ./pi-agent
-  skills/                       ← 内置 skill（当前仅 tavily-search）：COPY 进镜像，entrypoint 每次启动覆盖进 ~/.pi/agent/skills 同名目录
+  skills/                       ← 内置 skill（tavily-search / exa-search / pullpage / sbx，ADR-0040）：COPY 进镜像，entrypoint 每次启动覆盖进 ~/.pi/agent/skills 同名目录
 ```
 
 ## 常用命令

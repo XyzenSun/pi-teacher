@@ -1,0 +1,337 @@
+#!/usr/bin/env node
+// exa-search：Exa Search / Answer 的零依赖 Node CLI。
+//
+// 复用 Pi Teacher 镜像已有的 Node 24，不带 npm 运行时依赖；API key 由后端
+// 注入环境变量，skill 目录的 .env 仅保留本地直跑时的兼容兜底。
+const { parseArgs } = require("node:util");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const HELP = `Usage:
+  exa-search search <query> [flags]
+  exa-search answer <query> [flags]
+
+Common flags:
+  --format <markdown|json|pretty-json>  Output format; default markdown
+  --json                                Equivalent to --format json
+  --pretty                              Equivalent to --format pretty-json
+  --timeout <duration>                  Request timeout; default EXA_TIMEOUT or 60s
+
+Search flags:
+  --num-results <n>
+  --type <auto|neural|keyword|fast>
+  --category <category>
+  --include-domain <domain>             Repeatable
+  --exclude-domain <domain>             Repeatable
+  --start-published-date <date>
+  --end-published-date <date>
+  --start-crawl-date <date>
+  --end-crawl-date <date>
+  --include-text
+  --include-highlights
+  --context
+
+Answer flags:
+  --text
+  --context
+`;
+
+const DEFAULT_BASE_URL = "https://api.exa.ai";
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+function printHelp(output = process.stdout) {
+  output.write(HELP);
+}
+
+function fail(message, code = 1) {
+  console.error(message);
+  process.exitCode = code;
+}
+
+function parseCommandLine(argv) {
+  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    printHelp();
+    return null;
+  }
+
+  const command = argv[0];
+  if (command !== "search" && command !== "answer") {
+    printHelp(process.stderr);
+    throw new Error(`unknown command ${JSON.stringify(command)}`);
+  }
+
+  const options = {
+    format: { type: "string", default: "markdown" },
+    json: { type: "boolean", default: false },
+    pretty: { type: "boolean", default: false },
+    timeout: { type: "string" },
+  };
+  if (command === "search") {
+    Object.assign(options, {
+      "num-results": { type: "string", default: "10" },
+      type: { type: "string" },
+      category: { type: "string" },
+      "include-domain": { type: "string", multiple: true },
+      "exclude-domain": { type: "string", multiple: true },
+      "start-published-date": { type: "string" },
+      "end-published-date": { type: "string" },
+      "start-crawl-date": { type: "string" },
+      "end-crawl-date": { type: "string" },
+      "include-text": { type: "boolean", default: false },
+      "include-highlights": { type: "boolean", default: false },
+      context: { type: "boolean", default: false },
+    });
+  } else {
+    Object.assign(options, {
+      text: { type: "boolean", default: false },
+      context: { type: "boolean", default: false },
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv.slice(1),
+      options,
+      allowPositionals: true,
+      strict: true,
+    });
+  } catch (error) {
+    throw new Error(error.message);
+  }
+
+  if (parsed.values.help) {
+    printHelp();
+    return null;
+  }
+  const query = parsed.positionals.join(" ").trim();
+  if (!query) throw new Error("missing query");
+  return { command, query, values: parsed.values };
+}
+
+function skillDir() {
+  return path.resolve(__dirname, "..");
+}
+
+function readEnvFile(filePath) {
+  const values = {};
+  let content;
+  try {
+    content = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return values;
+  }
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const equals = line.indexOf("=");
+    if (equals <= 0) continue;
+    const key = line.slice(0, equals).trim();
+    const value = line.slice(equals + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) values[key] = value;
+  }
+  return values;
+}
+
+// 环境变量优先；.env 只为仓库外直接运行旧 skill 的方式保留兼容兜底。
+function getSetting(key, dotenv) {
+  const value = (process.env[key] || "").trim();
+  return value || dotenv[key] || "";
+}
+
+function parseDuration(value) {
+  const source = String(value).trim();
+  const pattern = /([+-]?(?:\d+(?:\.\d*)?|\.\d+))(ns|us|µs|ms|s|m|h)/gy;
+  let position = 0;
+  let milliseconds = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const factors = { ns: 1e-6, us: 1e-3, "µs": 1e-3, ms: 1, s: 1e3, m: 60e3, h: 3600e3 };
+    milliseconds += amount * factors[unit];
+    position = pattern.lastIndex;
+  }
+  if (position !== source.length || !Number.isFinite(milliseconds) || milliseconds <= 0) {
+    throw new Error(`invalid timeout ${JSON.stringify(value)}`);
+  }
+  return Math.max(1, Math.ceil(milliseconds));
+}
+
+function loadConfig(common) {
+  const dotenv = readEnvFile(path.join(skillDir(), ".env"));
+  const apiKey = getSetting("EXA_API_KEY", dotenv);
+  if (!apiKey) {
+    throw new Error("缺少 EXA_API_KEY；请在系统设置 → 高级配置 → 用户环境变量中填入");
+  }
+  const baseURL = (getSetting("EXA_BASE_URL", dotenv) || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const timeoutText = common.timeout || getSetting("EXA_TIMEOUT", dotenv) || "60s";
+  return {
+    apiKey,
+    baseURL,
+    timeoutMs: parseDuration(timeoutText),
+  };
+}
+
+function setIfNotEmpty(target, key, value) {
+  if (value !== undefined && value !== "") target[key] = value;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : value === undefined ? [] : [value];
+}
+
+function normalizedFormat(values) {
+  if (values.json) return "json";
+  if (values.pretty) return "pretty-json";
+  return values.format || "markdown";
+}
+
+function buildSearchBody(query, values) {
+  const body = { query, numResults: Number.parseInt(values["num-results"] ?? "10", 10) };
+  setIfNotEmpty(body, "type", values.type);
+  setIfNotEmpty(body, "category", values.category);
+  setIfNotEmpty(body, "startPublishedDate", values["start-published-date"]);
+  setIfNotEmpty(body, "endPublishedDate", values["end-published-date"]);
+  setIfNotEmpty(body, "startCrawlDate", values["start-crawl-date"]);
+  setIfNotEmpty(body, "endCrawlDate", values["end-crawl-date"]);
+  const includeDomains = asArray(values["include-domain"]);
+  const excludeDomains = asArray(values["exclude-domain"]);
+  if (includeDomains.length) body.includeDomains = includeDomains;
+  if (excludeDomains.length) body.excludeDomains = excludeDomains;
+  const contents = {};
+  if (values["include-text"]) contents.text = true;
+  if (values["include-highlights"]) contents.highlights = true;
+  if (Object.keys(contents).length) body.contents = contents;
+  if (values.context) body.context = true;
+  return body;
+}
+
+function buildAnswerBody(query, values) {
+  const body = { query };
+  if (values.text) body.text = true;
+  if (values.context) body.context = true;
+  return body;
+}
+
+async function postJSON(config, endpoint, body) {
+  const response = await fetch(`${config.baseURL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": config.apiKey },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(config.timeoutMs),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Exa API request failed with status ${response.status}: ${raw.trim()}`);
+  }
+  return raw;
+}
+
+function stringify(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function firstString(object, ...keys) {
+  for (const key of keys) {
+    if (!object || !(key in object)) continue;
+    const value = stringify(object[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function firstArray(object, ...keys) {
+  for (const key of keys) {
+    if (object && Array.isArray(object[key])) return object[key];
+  }
+  return [];
+}
+
+function stringArray(value) {
+  return Array.isArray(value) ? value.map(stringify).filter(Boolean) : [];
+}
+
+function writeField(lines, name, value) {
+  if (value) lines.push(`- ${name}: ${value}`);
+}
+
+function exaSearchMarkdown(query, value) {
+  const lines = ["# Exa Search Results", "", `Query: ${query}`, ""];
+  const results = firstArray(value, "results");
+  if (!results.length) {
+    lines.push("No results found.");
+    return `${lines.join("\n")}\n`;
+  }
+  results.forEach((item, index) => {
+    const result = item && typeof item === "object" ? item : {};
+    let title = firstString(result, "title", "name") || "Untitled";
+    lines.push(`## ${index + 1}. ${title}`);
+    writeField(lines, "URL", firstString(result, "url", "link"));
+    writeField(lines, "Published", firstString(result, "publishedDate", "published_date"));
+    writeField(lines, "Author", firstString(result, "author"));
+    if (result.score !== undefined) writeField(lines, "Score", stringify(result.score));
+    lines.push("");
+    const text = firstString(result, "text", "summary", "snippet");
+    if (text) lines.push(text, "");
+    const highlights = stringArray(result.highlights);
+    if (highlights.length) {
+      lines.push("Highlights:");
+      highlights.forEach((highlight) => lines.push(`- ${highlight}`));
+      lines.push("");
+    }
+  });
+  return `${lines.join("\n")}\n`;
+}
+
+function exaAnswerMarkdown(query, value) {
+  const result = value && typeof value === "object" ? value : {};
+  const lines = ["# Exa Answer", "", `Question: ${query}`, "", firstString(result, "answer", "text", "content") || stringify(value), ""];
+  const citations = firstArray(result, "citations", "sources", "results");
+  if (citations.length) {
+    lines.push("## Citations");
+    citations.forEach((item, index) => {
+      const citation = item && typeof item === "object" ? item : {};
+      const url = firstString(citation, "url", "link");
+      const title = firstString(citation, "title", "name") || url || "Citation";
+      lines.push(url ? `${index + 1}. [${title}](${url})` : `${index + 1}. ${title}`);
+      writeField(lines, "Published", firstString(citation, "publishedDate", "published_date"));
+      writeField(lines, "Author", firstString(citation, "author"));
+    });
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function writeOutput(raw, format, markdown) {
+  if (format === "json") {
+    process.stdout.write(`${raw}\n`);
+    return;
+  }
+  if (format === "pretty-json") {
+    try {
+      process.stdout.write(`${JSON.stringify(JSON.parse(raw), null, 2)}\n`);
+    } catch {
+      process.stdout.write(raw);
+    }
+    return;
+  }
+  if (format !== "markdown") throw new Error(`unsupported format ${JSON.stringify(format)}`);
+  process.stdout.write(markdown(JSON.parse(raw)));
+}
+
+async function run(argv) {
+  const commandLine = parseCommandLine(argv);
+  if (!commandLine) return;
+  const { command, query, values } = commandLine;
+  const config = loadConfig(values);
+  const raw = await postJSON(config, command === "search" ? "/search" : "/answer", command === "search" ? buildSearchBody(query, values) : buildAnswerBody(query, values));
+  writeOutput(raw, normalizedFormat(values), (value) => command === "search" ? exaSearchMarkdown(query, value) : exaAnswerMarkdown(query, value));
+}
+
+run(process.argv.slice(2)).catch((error) => {
+  fail(error.message || String(error));
+});

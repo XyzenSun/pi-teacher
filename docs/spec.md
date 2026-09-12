@@ -137,3 +137,23 @@ bug影响与触发条件: 只在容器里、且没有显式设 `PI_TEACHER_PROVI
 bug原因: `session/title-generator.ts` 为独立标题调用创建临时 Agent 时复用来源 Agent 的 `onPayload`，因此同一捕获数组也会收到标题请求。最后一次请求的最后一条 user 消息可能是 `TITLE_PROMPT`，不是本轮用户输入。
 bug影响与触发条件: 尚未命名的 Pi Session 首轮结束后自动生成标题；真实复习会话复现为同一轮捕获两次请求，按数组末项断言基础提醒会失败，第二轮不再生成标题时又能通过。这不等于精华提醒泄漏进复习会话。
 解决方法: `verify/http-smoke.ts` 用 `payloadForPrompt()` 按本轮原始输入定位对话请求，再严格比较整条用户消息与基础 / 精华文案；历史检查也读取该请求。不要禁用标题生成来规避，也不要只检查整个 payload 是否包含提醒字样。
+
+### `parseArgs` 的 `allowNegative` 要声明正向名，不能声明 `no-xxx`
+bug原因: Node `node:util.parseArgs` 开 `allowNegative: true` 后，`--no-cache` 的含义是「把布尔项 `cache` 置为 false」。若在 `options` 里直接声明一个名叫 `no-cache` 的布尔项，`--no-cache` 会被当成「否定 `no-cache` 这一项」，解析结果是 `{ "no-cache": false }`——读 `values["no-cache"]` 得到 `false`，与用户意图正好相反，缓存永远关不掉。
+bug影响与触发条件: 写 CLI 时凭直觉按命令行字面量声明选项名就会踩；`--no-xxx` 默认值为 `false` 时更隐蔽，因为不传和传都是 `false`，只有对照上游行为才发现开关失效。
+解决方法: 声明正向名（`cache: { type: "boolean", default: true }`），读 `values.cache`；`--no-cache` 自然得到 `false`。`skills/pullpage/scripts/pullpage` 里 `cache` 与 `only-main` 都按此写，并在 options 上留了注释说明原因。
+
+### esbuild 打包 npm CLI 必须 `--format=esm` 外加 `createRequire` banner
+bug原因: 把 `@xyzensun/sbx` 打成单文件时，`--format=cjs` 会让依赖里的 `createRequire(import.meta.url)` 退化成用未定义的 `__filename`，运行即 `ERR_INVALID_ARG_VALUE ... Received undefined`；只给 `--format=esm` 又会因为依赖内部有同步 `require("util")` 死在 `Error: Dynamic require of "util" is not supported`。两种单一格式都不可用。
+bug影响与触发条件: 依赖树里同时存在 CJS 与 ESM 写法的包（云沙箱 SDK 这类聚合包很常见）；只跑 `--version` 可能侥幸通过，真正调用到相关代码路径才崩。
+解决方法: `--format=esm` 配 `--banner:js='import{createRequire as __cr}from"module";const require=__cr(import.meta.url);'`，给 ESM 产物补一个真实的 `require`。完整重建命令与验证步骤记在 `skills/sbx/sourcecode/README.md`，升级换版本只改安装命令。
+
+### 无扩展名的 ESM 脚本会被上层 package.json 的 `type` 判成 CJS，症状是静默退出 0
+bug原因: skill 的可执行脚本按 Pi 约定不带扩展名（`scripts/tavily-search`），Node 判定它是 ESM 还是 CJS 的依据是**向上查找到的最近一个 `package.json` 的 `type` 字段**。若该文件写着 `"type": "commonjs"`（或没有 `type`），脚本里的 `import` 就被当 CJS 解析——而 Node 对这种情形**不报错**，直接什么都不做、退出码 0。
+bug影响与触发条件: 把脚本复制到临时目录测试时最容易踩。我在 `/tmp` 下验证 `.env` 兜底时，`/tmp/package.json`（一个与本项目无关的遗留文件，`"type": "commonjs"`）让同一份字节在仓库目录正常、在 `/tmp` 下零输出退出 0，排查了很久才定位。真实部署路径（容器 `/root/.pi/agent/skills/`、宿主 `~/.pi/agent/skills/`）上无 `package.json`，现网不受影响。
+解决方法: 在临时测试目录放一个 `{"type":"module"}` 的 `package.json`，或直接在 skill 原目录测。遇到「脚本无输出、退出码 0」先查 `ls` 各级父目录的 `package.json`，不要怀疑脚本逻辑——真有逻辑错误会抛异常而不是静默成功。
+
+### Node 24 会截获脚本参数里的 `--env-file`
+bug原因: `--env-file` 是 `node` 本身的 CLI 选项，且即使出现在脚本路径**之后**也会被 Node 吃掉，不会传给 `process.argv`。文件不存在时 Node 直接报 `node: <path>: not found` 并退出 9，看起来像脚本报的错。
+bug影响与触发条件: 三个 Node skill（`tavily-search` / `pullpage` / `exa-search`）一致。验证「`--env-file` 已废除」时会看到 Node 的报错而非预期的「未知参数」，容易误判成脚本没拦住。
+解决方法: 不必在脚本里显式拒绝 `--env-file`，Node 已经让它不可用；断言时改用其他未知 flag（如 `--bogus-flag`）验证 `parseArgs` 的 `strict: true` 生效。
