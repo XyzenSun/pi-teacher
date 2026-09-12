@@ -8,6 +8,7 @@
 - **GET /api/models 降级**：默认模型不可用时不再整接口 503（用户连可用模型都看不到），改为列表照常返回 + `defaultModel: null`（前端已支持该形态）；开会话路径（agent-session-wrapper）保持抛 503——不能静默换模型开课。
 - **高级设置白屏**：后端进程是 Sep10 启动的旧代码（`setting` 表与 `/api/config/settings` 的 `app` 字段都是 `97dd87c` Sep11 才落地），Vite 前端热更新是新代码，`settings.app.reminderIntervalTurns` 上 TypeError → 无 ErrorBoundary → 整页白屏；其他 tab 不依赖 `app` 所以正常。修复：重启后端（新代码幂等补建 `setting` 表，实测已补、admin 账号保留）+ 前端新增顶层 `ErrorBoundary`（`web/src/ui/ErrorBoundary.tsx`），未来渲染错误显示可读错误页而非白屏。
 - 验证：后端 typecheck、`verify:catalog`（新增，12/0：指纹检测自动重载、auth.json 变化、显式刷新、503 语义、路由层降级）、`verify:config` 108/0（顺手修复 BUILTIN_USER_ENV 扩到 13 项后硬编码期望过期的既有失败断言，改为动态构造）、`verify:lifecycle` 18/0、`http-smoke` 522/0（octopus / deepseek-normal-latest）、前端 build 通过。踩坑（setsid 残留进程写覆盖日志造成假失败）记入 spec.md。
+- 后续（同日）：根 CLAUDE.md 改名为 AGENTS.md（pi 项目上下文标准名）并按 edit-agents-md 审查修订 6 处过时项（目录结构行、ADR 编号到 0042、文档表补 0040–0042、技术事实补模型目录指纹检测与 /api/models 降级、编码约束精简历史句与补 setsid 日志坑），删除旧 CLAUDE.md 避免双份漂移；已随 commit `f0894c3` 后的工作区变更待提交。
 
 ## 上一阶段：tingwu-transcribe 接入为第五个内置 skill（已实现，待容器验收）
 
