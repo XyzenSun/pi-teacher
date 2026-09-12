@@ -1,0 +1,117 @@
+name: Publish image to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_tag:
+        description: "要发布的 git tag（例如 v0.1.0）"
+        required: true
+        type: string
+
+# 同一 tag 不并发跑：连点两次时后一次覆盖前一次，避免两个构建抢同一个 image tag。
+concurrency:
+  group: publish-image-${{ inputs.git_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # 读仓库与 tag
+      packages: write # 推 GHCR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 默认 depth=1 拿不到 tag，解析 tag -> commit 需要完整历史；
+          # fetch-tags 显式打开，避免个别版本只拉分支不拉 tag。
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 解析 tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.git_tag }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            echo "::error::输入为空，请填写一个已存在的 git tag"
+            exit 1
+          fi
+
+          # ^{commit} 把轻量 tag 和 annotated tag 统一解到 commit；
+          # 不存在（或指向 blob/tree 等非 commit 对象）时 rev-parse 非零退出。
+          if ! sha=$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}"); then
+            echo "::error::git tag '${tag}' 不存在，本次不发布"
+            echo "现有 tag：" >&2
+            git tag --list >&2
+            exit 1
+          fi
+
+          # 大小写转换的关键一步：GHCR 镜像路径只接受小写。
+          image="ghcr.io/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "actor=$(printf '%s' "$ACTOR" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 发布会话"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| git tag | \`${tag}\` |"
+            echo "| commit | \`${sha}\` |"
+            echo "| 镜像 | \`${image}:${tag}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 切到 tag 指向的 commit
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # 镜像内容必须来自 tag 指向的这个 commit，而不是触发时所在分支的 HEAD。
+          git checkout --detach "$SHA"
+          git --no-pager log -1 --format='%H %s'
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        env:
+          GHCR_ACTOR: ${{ steps.resolve.outputs.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.resolve.outputs.image }}:${{ steps.resolve.outputs.tag }}
+          # 缓存挂到 Actions cache，两次发布之间少装一遍 npm 依赖。
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.resolve.outputs.sha }}
+            org.opencontainers.image.version=${{ steps.resolve.outputs.tag }}
+
+      - name: 收尾
+        if: always()
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          docker logout ghcr.io || true
+          echo "镜像：\`${IMAGE}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "拉取：\`docker pull ${IMAGE}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
