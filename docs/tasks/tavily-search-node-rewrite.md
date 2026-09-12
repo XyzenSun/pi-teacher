@@ -1,6 +1,6 @@
 # tavily-search 由 Go 重写为 Node 单文件
 
-> 状态：已实现，待容器验收（2026-09-12）。决策见 ADR-0041，取代 ADR-0040「tavily-search 保持 Go 二进制不动」一句。
+> 状态：已完成（2026-09-12）。决策见 ADR-0041，取代 ADR-0040「tavily-search 保持 Go 二进制不动」一句。
 
 把最后一个 Go 实现的内置 skill 换成零依赖 Node 单文件，`skills/` 四个 skill 的实现范式归一，仓库不再包含任何 Go 代码与编译产物。
 
@@ -70,10 +70,10 @@ ADR-0040 当时的判断是「已在线上跑通，重写没有新增收益」�
 - [x] **真实调用**：真 key 实跑，markdown / answer / 各参数组合均正常
 - [x] 缺 key 时报错指向设置页；`--timeout 1ms` 触发超时；`--env-file` 已不可用（Node 本体截获，见下）
 - [x] 假 key 打到 Tavily 返回平台层 401（证明请求真实发出）
-- [x] `npm run typecheck` 通过；`npm run http-smoke` 用 octopus / deepseek-normal-latest 重跑
-- [ ] 重建镜像 → 备份 → `up -d` → 容器内 `scripts/tavily-search --help` 正常、权限 755
-- [ ] `verify:remote` 全绿（现有四探针断言不改）
-- [ ] 镜像 `/app/skills` 体积由 13M 降到约 5M
+- [x] `npm run typecheck` 通过；`npm run http-smoke` 用 octopus / deepseek-normal-latest 重跑 **522 / 0 / 0**
+- [x] 重建镜像 → 备份 117M → `up -d` → 容器内 `scripts/tavily-search --help` 正常、权限 755、缺 key 文案指向设置页
+- [x] `verify:remote` **51 通过 / 0 失败**（四探针断言不改，全部由真模型在容器内跑通）
+- [x] 镜像 `/app/skills` 由 13M 降到 **4.9M**
 - [x] 文档：ADR-0041 新建、ADR-0040 加状态行与行内注、`TODO.md` 更新、三个坑追加 `docs/spec.md`、U+FFFD 检查
 
 ## 功能验证记录（2026-09-12，21 项全过）

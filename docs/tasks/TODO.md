@@ -1,8 +1,8 @@
 # TODO
 
-## 当前阶段：tavily-search Node 重写（仓库 Go 归零）已实现，待容器验收
+## 当前阶段：tavily-search Node 重写（仓库 Go 归零）已部署到验证容器，待用户 WebUI 验收
 
-**tavily-search-node-rewrite（2026-09-12）**：PRD 见 `tavily-search-node-rewrite.md`，决策见 ADR-0041（取代 ADR-0040「tavily-search 保持 Go 不动」一句）。最后一个 Go skill 换成零依赖 Node 单文件（12638 字节，ESM，与 `pullpage` 同范式），`sourcecode/` 整目录删除，**仓库内 `*.go` 归零**。有意的行为变更只有两处：缺 key 报错指向设置页（旧版让用户复制 `.env.example`，与 ADR-0034 相悖且容器里无该文件）、移除 `--env-file`（文档本就明令不要传；实测 Node 24 还会截获脚本后的 `--env-file` 参数并 exit 9，三个 Node skill 一致）。21 项功能直测全过（真 key 真调用：markdown 渲染、`--include-answer` 的 `## Answer` 段、参数在 query 前后、`--json`/`--pretty`、重复 `--include-domain` 真实限定结果、`--include-raw-content` 的 `<details>` 折叠、`.env` 兜底与环境变量优先、非法 timeout / max-results 报错文案与 Go 版一致）。`BUILTIN_USER_ENV` 的 `TAVILY_TIMEOUT` 描述去「Go duration」字样；`SKILL.md` 删 Pi 不解析的 `allowed-tools`；`references/advanced-cli.md` 同步。typecheck 通过。容器验收（重建镜像 → `verify:remote`）进行中。
+**tavily-search-node-rewrite（2026-09-12）**：PRD 见 `tavily-search-node-rewrite.md`，决策见 ADR-0041（取代 ADR-0040「tavily-search 保持 Go 不动」一句）。最后一个 Go skill 换成零依赖 Node 单文件（12638 字节，ESM，与 `pullpage` 同范式），`sourcecode/` 整目录删除，**仓库内 `*.go` 归零**。有意的行为变更只有两处：缺 key 报错指向设置页（旧版让用户复制 `.env.example`，与 ADR-0034 相悖且容器里无该文件）、移除 `--env-file`（文档本就明令不要传；实测 Node 24 还会截获脚本后的 `--env-file` 参数并 exit 9，三个 Node skill 一致）。21 项功能直测全过（真 key 真调用：markdown 渲染、`--include-answer` 的 `## Answer` 段、参数在 query 前后、`--json`/`--pretty`、重复 `--include-domain` 真实限定结果、`--include-raw-content` 的 `<details>` 折叠、`.env` 兜底与环境变量优先、非法 timeout / max-results 报错文案与 Go 版一致）。`BUILTIN_USER_ENV` 的 `TAVILY_TIMEOUT` 描述去「Go duration」字样；`SKILL.md` 删 Pi 不解析的 `allowed-tools`；`references/advanced-cli.md` 同步。验证：typecheck 通过、`http-smoke` **522/0/0**（换 octopus / deepseek-normal-latest 后一次过）；镜像重建后 `/app/skills` 由 13M 降到 **4.9M**，备份 117M → `up -d`，`verify:remote` **51 通过 / 0 失败**（四个 skill 全部由真模型在容器内跑通）。代码与文档已随 commit `7dc02b7` 推送到 `origin/main`。浏览器由用户在验证容器（端口 39873）上验收。
 
 ## 上一阶段：内置 skill 接入（pullpage / exa-search / sbx）已部署到验证容器，待用户 WebUI 验收
 

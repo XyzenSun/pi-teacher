@@ -157,3 +157,8 @@ bug影响与触发条件: 把脚本复制到临时目录测试时最容易踩。
 bug原因: `--env-file` 是 `node` 本身的 CLI 选项，且即使出现在脚本路径**之后**也会被 Node 吃掉，不会传给 `process.argv`。文件不存在时 Node 直接报 `node: <path>: not found` 并退出 9，看起来像脚本报的错。
 bug影响与触发条件: 三个 Node skill（`tavily-search` / `pullpage` / `exa-search`）一致。验证「`--env-file` 已废除」时会看到 Node 的报错而非预期的「未知参数」，容易误判成脚本没拦住。
 解决方法: 不必在脚本里显式拒绝 `--env-file`，Node 已经让它不可用；断言时改用其他未知 flag（如 `--bogus-flag`）验证 `parseArgs` 的 `strict: true` 生效。
+
+### `verify:remote` 的 skill 探针轮偶发 240 秒超时，重跑即过
+bug原因: 该轮要求真模型在一次回复里用 bash 跑完四条 skill 命令（`remote-check.ts` 的 `skillProbePrompt`），比普通对话重得多。手动复现同一 prompt 实测约 60 秒，但模型偶尔会在这一轮上耗尽 240 秒的 `waitFor`，报「等待超时：SSE prompt_done（真模型完成回复）」。
+bug影响与触发条件: 与被验证的代码无关，换慢模型（如 agnes-2.5-flash）时更容易命中。`http-smoke` 末尾的真模型轮同理，曾因同一原因超时，换 octopus / deepseek-normal-latest 后 522 项一次过。
+解决方法: 先重跑一次再怀疑代码；跑之前把默认模型指向快的 provider——`http-smoke` 用 `PI_TEACHER_PROVIDER=octopus PI_TEACHER_MODEL=deepseek-normal-latest npm run http-smoke`（脚本内是 `??=`，环境变量能覆盖默认的 agnes），容器则在 `docker compose up -d` 时带上同名变量。排查时不要手搓 curl 复现：`POST /api/conversations` 的字段是 `spaceId` + `agentsMdId`（不是 `workspaceId`），`POST /command` 的字段是 `message`（不是 `text`），且 SSE 在独立的 `GET /api/conversations/:id/events`，猜错字段只会收到 400 而看起来像「模型不回」。
