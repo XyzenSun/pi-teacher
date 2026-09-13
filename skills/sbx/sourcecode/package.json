@@ -1,0 +1,55 @@
+{
+  "name": "@xyzensun/sbx",
+  "version": "0.1.0",
+  "description": "Unified CLI for cloud sandboxes (Daytona / E2B / CodeSandbox): create, run, upload, download, preview — built for AI agent code verification",
+  "type": "module",
+  "bin": {
+    "sbx": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "SKILL.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "keywords": [
+    "sandbox",
+    "cloud-sandbox",
+    "daytona",
+    "e2b",
+    "codesandbox",
+    "cli",
+    "agent",
+    "code-execution",
+    "code-verification",
+    "claude",
+    "claude-code",
+    "skill"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://codeup.aliyun.com/68fa4149bb64aae551966922/sandbox-cli.git"
+  },
+  "dependencies": {
+    "@codesandbox/sdk": "^2.4.2",
+    "@daytona/sdk": "^0.210.0",
+    "commander": "^15.0.0",
+    "e2b": "^2.46.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
