@@ -5,7 +5,7 @@
 ## 分支模型
 
 - `dev-codeup`：私有主开发分支（codeup），完整源码 + `docs/`；日常开发、验证、修复与功能新增都在这里进行。
-- `main`：开源稳定分支（GitHub `XyzenSun/pi-teacher`），只发布验证过的版本；私有内容（`docs/`、`AGENTS.md`、`CLAUDE.md`、`.claude/`、`skills/sbx/sourcecode/README.md`）被该分支的 `.gitignore` 排除。
+- `main`：开源稳定分支（GitHub `XyzenSun/pi-teacher`），只发布验证过的版本；私有内容（`docs/`、`AGENTS.md`、`CLAUDE.md`、`.claude/`、整个 `skills/sbx/sourcecode/`——其 package.json 含 codeup 仓库地址，ADR-0043）被该分支的 `.gitignore` 排除。
 - 同步方式：dev-codeup 的提交 cherry-pick 到 main 后推送 GitHub；两分支无共同历史，merge 不可用。cherry-pick 触及私有路径的提交时用 `-n` 进工作区、剔除被排除路径后再提交。
 
 ## 目录结构
@@ -38,7 +38,7 @@ pi-teacher/
     deploy.md                   ← Docker 部署：挂载变量、内置 skill 覆盖规则、升级、备份、常见错误
   Dockerfile / docker-entrypoint.sh / compose.yaml / docker-compose.yaml
                                 ← 容器内完全按 Pi 约定（~/pi-teacher、~/.pi/agent、~/.pi/agent/skills）；宿主路径由 HOST_* 变量决定，默认 ./pi-teacher 与 ./pi-agent。两份 compose 共存：compose.yaml 源码构建 + healthcheck（开发验证），docker-compose.yaml 拉 GHCR 镜像（开源发布，与 main 分支同步维护）
-  skills/                       ← 内置 skill（tavily-search / exa-search / pullpage / sbx / tingwu-transcribe，ADR-0040 / 0041 / 0042）：COPY 进镜像，entrypoint 每次启动覆盖进 ~/.pi/agent/skills 同名目录
+  skills/                       ← 内置 skill（tavily-search / exa-search / pullpage / sbx / tingwu-transcribe，ADR-0040 / 0041 / 0042 / 0043）：COPY 进镜像，entrypoint 每次启动覆盖进 ~/.pi/agent/skills 同名目录
 ```
 
 ## 常用命令
@@ -77,7 +77,7 @@ docker compose build && docker compose up -d   # 容器部署；docker compose s
 - FSRS：`learning_steps: []`、`relearning_steps: []`，一卡一天最多出现一次；时间列统一 SQLite 空格分隔格式（`dateToSqliteText()`），不能存 ISO 串。
 - 学习 / 复习会话空闲 10 分钟回收；固定助教按 ADR-0035 常驻、只随 SIGTERM 关闭（`resident` 选项，`registerSignalHandlers()` 只在 `startServer` 里注册）；`PI_TEACHER_PROVIDER` / `PI_TEACHER_MODEL` 设定后默认模型不可在界面修改（compose 传入空串视同未设置）。
 - 用户环境变量（ADR-0034）：`user_env` 表是唯一源，后端启动与每次保存都写进自己的 `process.env`；Pi 的 bash 工具每次 spawn 都复制当前 `process.env`，所以 skill 子进程立即拿到新值，不用重开会话。容器 env 与旧 `~/pi-teacher/.env` 只在 key 尚不在表里时首次导入一次，之后不再读；没有 `.env` 文件也没有 `env-sync`。
-- 内置 skill（ADR-0040 / 0041 / 0042）：五个目录随镜像走，目录名即各自 `SKILL.md` 的 `name`；`tavily-search` / `pullpage` / `exa-search` 是零依赖 Node 脚本（脚本本身即源码，改行为直接改它），`sbx` 是 esbuild bundle（重建方法见 `skills/sbx/sourcecode/README.md`），`tingwu-transcribe` 是上游原样接入的零依赖 Node skill（Cookie 鉴权，默认落 skill 目录内，重启即失效属已知取舍）。仓库不再有 Go。「何时用哪个 skill」只写在各自 `description` 里，Pi 会自动注入 `<available_skills>`，**不写进全局 AGENTS.md**；`allowed-tools` 字段 Pi v0.84.2 不解析。
+- 内置 skill（ADR-0040 / 0041 / 0042）：五个目录随镜像走，目录名即各自 `SKILL.md` 的 `name`；`tavily-search` / `pullpage` / `exa-search` 是零依赖 Node 脚本（脚本本身即源码，改行为直接改它），`sbx` 是 esbuild bundle，源码就在 `skills/sbx/sourcecode/`（本仓库即权威，ADR-0043；改源码后按其 README 重打提交产物），`tingwu-transcribe` 是上游原样接入的零依赖 Node skill（Cookie 鉴权，默认落 skill 目录内，重启即失效属已知取舍）。仓库不再有 Go。「何时用哪个 skill」只写在各自 `description` 里，Pi 会自动注入 `<available_skills>`，**不写进全局 AGENTS.md**；`allowed-tools` 字段 Pi v0.84.2 不解析。
 
 ## 编码约束
 

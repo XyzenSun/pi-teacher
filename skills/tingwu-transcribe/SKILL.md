@@ -10,7 +10,7 @@ compatibility: Node.js >= 18（零第三方依赖，无需 npm install）
 通义听悟私有 API 封装，两个入口位于 scripts/，共享同一业务编排层（scripts/core.js）：
 
 - **scripts/cli.js**：AI 用，纯命令行，无需启动服务——转写任务默认走这里
-- **scripts/server.js**：Web 网关（WebUI + REST），用户要在页面上传/浏览时启动
+- **scripts/server.js**：Web 网关（WebUI + REST），用户要在页面上传/浏览时启动，不推荐，建议让用户使用`https://tingwu.aliyun.com` 操作提供文件名，提供cli解析结果，节省上传开销。
 
 ## 前置：Cookie
 

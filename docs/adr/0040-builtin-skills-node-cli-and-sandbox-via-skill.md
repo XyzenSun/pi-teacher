@@ -2,9 +2,7 @@
 
 > 状态：现行。取代 ADR-0015「沙箱的接入形态是插件」与 ADR-0027「沙箱走插件」两句结论。
 > 其中「既有的 tavily-search 保持 Go 二进制不动」一句已被 ADR-0041 取代——该 skill 已重写为零依赖 Node 单文件。
-> 状态：「既有的 tavily-search 保持 Go 二进制不动」被 ADR-0041 取代——已重写为零依赖 Node 单文件。
-> 状态：「既有的 tavily-search 保持 Go 二进制不动」被 ADR-0041 取代——已重写为零依赖 Node 单文件。
-> 状态：「既有的 tavily-search 保持 Go 二进制不动」被 ADR-0041 取代——已重写为零依赖 Node 单文件。
+> 其中「sbx 源码归上游仓库管辖」「切换或新增沙箱平台由上游 CLI 负责」的表述已被 ADR-0043 更新——sbx 源码已整体转入本仓库 `skills/sbx/sourcecode/`，本仓库即权威。
 
 接入 `pullpage`（单 URL 抓取，聚合 tavily / exa / firecrawl / jina）、`exa-search`（Exa 搜索与问答）、`sbx`（Daytona / E2B / CodeSandbox 云沙箱）三个 skill，仓库 `skills/` 从 1 个变成 4 个。三者都随镜像走，由 `docker-entrypoint.sh` 每次启动覆盖同步进 `~/.pi/agent/skills`（ADR-0029 不变）。
 
