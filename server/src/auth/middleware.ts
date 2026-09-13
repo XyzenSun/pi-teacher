@@ -2,8 +2,11 @@
  * cookie 中间件：解析 + 校验签名 + 注入 req.session。
  *
  * cookie 设计（PRD 认证结论）：值 = `<token>.<HMAC-SHA256(token, serverKey)>`，
- * HttpOnly + SameSite=Lax。serverKey 首次启动随机生成存 data 目录——
- * 重启后旧 cookie 仍有效，不需要 everybody 重登。
+ * HttpOnly + SameSite=Lax。serverKey 首次启动随机生成存 data 目录。
+ * 注意：serverKey 持久化只保证旧 cookie 的验签能通过，登录态本身存在
+ * session-store.ts 的内存 Map 里，服务重启即全部失效（重新登录）——
+ * 单用户自部署下「重启重登」完全可接受。serverKey 落盘的价值要等将来
+ * 会话真正落盘持久化时才兑现，当前它只是让签名密钥跨重启稳定。
  * 手写解析不引 cookie-parser：只有我们自己种的一个 cookie，格式可控。
  */
 import { createHmac, timingSafeEqual, createHash } from "node:crypto";
