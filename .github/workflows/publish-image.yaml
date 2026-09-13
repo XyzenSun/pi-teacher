@@ -37,7 +37,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag="$INPUT_TAG"
+          # 去掉输入两端的空白，避免复制粘贴时带上空格。
+          # 用参数展开而不是 xargs：xargs 会吃掉引号和反斜杠，可能悄悄改掉 tag 名。
+          tag="${INPUT_TAG#"${INPUT_TAG%%[![:space:]]*}"}"
+          tag="${tag%"${tag##*[![:space:]]}"}"
           if [ -z "$tag" ]; then
             echo "::error::输入为空，请填写一个已存在的 git tag"
             exit 1
@@ -52,13 +55,39 @@ jobs:
             exit 1
           fi
 
+          # 稳定版判定：v1.2.3 / v1.2 这类不带预发布后缀（-rc1 / -beta）的版本号。
+          # 只有稳定版才移动 latest，预发布版本只推自己的 tag，避免 latest 被 rc 顶掉。
+          if [[ "$tag" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            is_stable=true
+          else
+            is_stable=false
+          fi
+
           # 大小写转换的关键一步：GHCR 镜像路径只接受小写。
           image="ghcr.io/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
+
+          # 要推送的镜像 tag：稳定版多推一个 latest。
+          # 用 $GITHUB_OUTPUT 的 heredoc 语法写多行，空行不出现，build-push-action 直接吃这串。
+          {
+            echo "tags<<EOF"
+            echo "${image}:${tag}"
+            if [ "$is_stable" = "true" ]; then
+              echo "${image}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "is_stable=${is_stable}" >> "$GITHUB_OUTPUT"
           echo "actor=$(printf '%s' "$ACTOR" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+          if [ "$is_stable" = "true" ]; then
+            echo "::notice::稳定版，同时推送 ${image}:${tag} 与 ${image}:latest"
+          else
+            echo "::notice::非稳定版，只推送 ${image}:${tag}，不移动 latest"
+          fi
 
           {
             echo "### 发布会话"
@@ -68,6 +97,11 @@ jobs:
             echo "| git tag | \`${tag}\` |"
             echo "| commit | \`${sha}\` |"
             echo "| 镜像 | \`${image}:${tag}\` |"
+            if [ "$is_stable" = "true" ]; then
+              echo "| latest | 是（\`${image}:latest\` 指向本次构建） |"
+            else
+              echo "| latest | 否（预发布版本不移动 latest） |"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 切到 tag 指向的 commit
@@ -95,8 +129,8 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.resolve.outputs.image }}:${{ steps.resolve.outputs.tag }}
+          # 稳定版是「tag + latest」两行，预发布只有一行，见「解析 tag」步骤。
+          tags: ${{ steps.resolve.outputs.tags }}
           # 缓存挂到 Actions cache，两次发布之间少装一遍 npm 依赖。
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -110,8 +144,21 @@ jobs:
         env:
           IMAGE: ${{ steps.resolve.outputs.image }}
           TAG: ${{ steps.resolve.outputs.tag }}
+          IS_STABLE: ${{ steps.resolve.outputs.is_stable }}
         run: |
+          set -euo pipefail
           docker logout ghcr.io || true
-          echo "镜像：\`${IMAGE}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "拉取：\`docker pull ${IMAGE}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+
+          # 解析步骤就失败时前面没产出 image/tag，摘要里不再拼半截命令。
+          if [ -z "${TAG:-}" ]; then
+            exit 0
+          fi
+
+          {
+            echo ""
+            echo "拉取：\`docker pull ${IMAGE}:${TAG}\`"
+            if [ "${IS_STABLE:-false}" = "true" ]; then
+              echo ""
+              echo "latest 已同步：\`docker pull ${IMAGE}:latest\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
