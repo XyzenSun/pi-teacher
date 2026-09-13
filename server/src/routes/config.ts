@@ -3,6 +3,9 @@
  *
  * 所有读写都走 server/src/config/pi-config.ts，本文件只负责 HTTP 形状与鉴权，
  * 不直接触碰 models.json 或 settings.json——secret 的脱敏规则只应有一处实现。
+ *
+ * 鉴权不在本文件内组装：整个 /api/config 由 index.ts 的 requireAuth 中间件保护，
+ * 除 /api/auth 外的 /api 路由都先过它。本文件里只有 HTTP 形状与参数校验。
  */
 import { Router } from "express";
 import type { AppState } from "./app-state.ts";

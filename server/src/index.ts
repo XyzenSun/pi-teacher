@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { openDatabase, closeDatabase } from "./db/connection.ts";
 import { initializeSchema } from "./db/schema.ts";
 import { bootstrapUserEnv } from "./config/user-env.ts";
-import { apiRequestSecurity } from "./security/request-security.ts";
+import { apiRequestSecurity, isRequestSecurityEnabled } from "./security/request-security.ts";
 import { initCookieSigning, requireAuth } from "./auth/middleware.ts";
 import { createAuthRouter } from "./routes/auth.ts";
 import { createWorkspacesRouter } from "./routes/workspaces.ts";
@@ -64,6 +64,12 @@ export async function buildApp(options: ServerOptions = {}) {
     const state: AppState = { db, homeDir, dataDir };
     const app = express();
     app.disable("x-powered-by");
+    // 启动就把安全姿态说清楚：默认关闭是刻意的取舍，但不应该是隐形的。
+    if (isRequestSecurityEnabled()) {
+      console.log("[security] Host 白名单与同源校验已开启（PI_TEACHER_REQUEST_SECURITY）");
+    } else {
+      console.warn("[security] Host 白名单与同源校验已关闭（默认）；需要防 DNS rebinding / CSRF 时设 PI_TEACHER_REQUEST_SECURITY=true");
+    }
     // 信任校验与认证先于大请求体解析，二进制附件由其路由单独限量。
     app.use("/api", apiRequestSecurity);
     app.use("/api", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });

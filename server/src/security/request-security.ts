@@ -1,6 +1,14 @@
 // 移植自 pi-web v0.9.0 lib/request-security.ts（MIT License），改写为 Express
 // 中间件形态。pi-teacher 用法见 PRD backend-host-mvp：先信任校验（本文件）
 // 后认证——Host 不合法的请求连 401 都不给，防止 DNS rebinding 与跨站请求。
+//
+// 两道校验默认【关闭】，由 PI_TEACHER_REQUEST_SECURITY 打开（默认值见下方说明）：
+//   1. Host 白名单 —— 防 DNS rebinding；
+//   2. Origin / Sec-Fetch-Site 同源 —— 防 CSRF。
+// 关闭的理由：单机自托管下 SameSite=Lax 已拦掉跨站写请求的 Cookie（本项目所有写操作
+// 都是 POST/PATCH/DELETE），rebinding 也需要叠加「攻击者控制同父域子域」才可能奏效；
+// 而开启后只要用域名访问又忘了配 PI_TEACHER_HOSTNAME，就会撞 403。
+// 公网部署或对安全敏感时把它打开。
 import { isIP } from "node:net";
 import type { NextFunction, Request, Response } from "express";
 
@@ -55,6 +63,21 @@ function configuredHostnamesFromEnvironment(): string[] {
   ].filter((value): value is string => Boolean(value?.trim()));
 }
 
+/**
+ * 两道校验的总开关，默认关闭。
+ *
+ * 认这几个词（大小写不敏感、可带空白）：`true` / `1` / `on` / `yes`；
+ * 其余一切取值（含未设置、空串、拼写错误）都视为关闭——拼错时保持默认姿态，
+ * 不会因为写了个 `TURE` 就以为防护开着。
+ *
+ * 受保护前缀 PI_TEACHER_ 会挡住用户环境变量界面（config/user-env.ts），
+ * 因此这是纯部署期开关，只能在 compose / .env / docker run -e 里设。
+ */
+export function isRequestSecurityEnabled(): boolean {
+  const raw = process.env.PI_TEACHER_REQUEST_SECURITY?.trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "on" || raw === "yes";
+}
+
 function canonicalOrigin(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -105,8 +128,13 @@ export function shouldCheckApiRequestOrigin(
   return origin !== undefined || fetchSite !== undefined;
 }
 
-/** Express 中间件：Host + Origin/sec-fetch-site 双段校验（先于认证）。 */
+/** Express 中间件：Host + Origin/sec-fetch-site 双段校验（先于认证）。
+ *  总开关关闭时直接放行，两道校验都不做。 */
 export function apiRequestSecurity(req: Request, res: Response, next: NextFunction): void {
+  if (!isRequestSecurityEnabled()) {
+    next();
+    return;
+  }
   if (!isApiRequestHostAllowed(req.headers.host)) {
     res.status(403).json({ error: "Invalid Host header" });
     return;
