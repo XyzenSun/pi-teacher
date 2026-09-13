@@ -1,12 +1,18 @@
 // 业务编排层：转写 / 结果 / 导出的完整流程。
 // server.js（HTTP 网关）与 cli.js（命令行）共享本模块——听悟协议的编排细节
-// （generatePutLink -> OSS 上传 -> syncPutLink -> 轮询）只在此维护一份，
-// 两个入口各自只关心参数解析与输出格式。
+// (本地上传或听悟服务器下载 -> 转写 -> 轮询) 只在此维护一份,
+// 两个入口各自只关心参数解析与输出格式.
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   generatePutLink,
   syncPutLink,
+  parseNetSourceUrl,
+  queryNetSourceParse,
+  putNetSourceUrl,
+  queryNetSourceUpload,
+  getTransList,
   getTransStatus,
   getTransResult,
   getExportStatus,
@@ -18,6 +24,8 @@ import { getCurrentCookie, isCookieInvalid } from './cookie-store.js';
 
 const TRANSCRIBE_POLL_INTERVAL_MS = 2000;
 const TRANSCRIBE_DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 长音频转写可能持续较久
+const NET_SOURCE_POLL_INTERVAL_MS = 1000;
+const NET_SOURCE_TIMEOUT_MS = 120 * 1000;
 const EXPORT_POLL_INTERVAL_MS = 1000;
 const EXPORT_TIMEOUT_MS = 120 * 1000;
 
@@ -77,24 +85,57 @@ function newFrontendTaskId() {
   return `rc-upload-${Date.now()}-${taskIdSequence}`;
 }
 
-async function waitUntilTranscribed(transId, cookie, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const statusResponse = await getTransStatus({ transIds: [transId], preview: 1 }, cookie);
-    const item = statusResponse.data?.[0];
-    if (!item) {
-      throw new GatewayError(502, 'TRANSCRIPTION_NOT_FOUND', `听悟查不到任务 ${transId}`);
-    }
-    // 抓包验证：0=转写完成，1=转写中（含 progress 字段）
-    if (item.status === 0) return item;
-    if (item.status !== 1) {
-      throw new GatewayError(502, 'TRANSCRIPTION_FAILED',
-        `听悟返回异常任务状态 ${item.status}（transId=${transId}）`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, TRANSCRIBE_POLL_INTERVAL_MS));
+function validateTimeout(timeoutMs) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2147483647) {
+    throw new GatewayError(400, 'INVALID_TIMEOUT', '超时必须是正数, 换算为毫秒后须为整数且不超过 2147483647');
   }
-  throw new GatewayError(504, 'POLL_TIMEOUT',
-    `轮询转写状态超过 ${Math.round(timeoutMs / 1000)} 秒仍未完成，可稍后用 status 命令或 GET /transcripts/${transId} 再查`);
+}
+
+// 截止时间同时约束 HTTP 请求和轮询间隔, 避免上游请求挂起后超时失效.
+async function withPollingTimeout(timeoutMs, message, detail, operation) {
+  validateTimeout(timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    return await operation(signal);
+  } catch (cause) {
+    if (signal.aborted) throw new GatewayError(504, 'POLL_TIMEOUT', message, detail);
+    throw cause;
+  }
+}
+
+function checkTranscriptionStatus(item, transId, netSource) {
+  // 官方前端确认 3=已上传待转写, 网络来源还会经历 4=等待下载和 5=下载中.
+  if (![0, 1, 3, ...(netSource ? [4, 5] : [])].includes(item.status)) {
+    throw new GatewayError(502, 'TRANSCRIPTION_FAILED',
+      `听悟返回异常任务状态 ${item.status} (transId=${transId})`,
+      { transId, status: item.status, statusMsg: item.statusMsg });
+  }
+}
+
+async function waitUntilTranscribed(transId, cookie, timeoutMs, { netSource = false } = {}) {
+  return withPollingTimeout(timeoutMs,
+    `轮询转写超过 ${Math.round(timeoutMs / 1000)} 秒, 可稍后用 status 命令或 GET /transcripts/${transId} 再查`,
+    { transId, phase: 'transcribe' }, async (signal) => {
+      while (true) {
+        const statusResponse = await getTransStatus({ transIds: [transId], preview: 1, signal }, cookie);
+        const item = statusResponse.data?.find((entry) => entry.transId === transId);
+        if (!item) {
+          throw new GatewayError(502, 'TRANSCRIPTION_NOT_FOUND', `听悟查不到任务 ${transId}`, { transId });
+        }
+        checkTranscriptionStatus(item, transId, netSource);
+        if (item.status === 0) return item;
+        if (netSource && [4, 5].includes(item.status)) {
+          const downloadResponse = await queryNetSourceUpload({ transIds: [transId], signal }, cookie);
+          const download = downloadResponse.data?.find((entry) => entry.transId === transId);
+          if (download && ![-1, 0].includes(download.status)) {
+            throw new GatewayError(502, 'NET_SOURCE_DOWNLOAD_FAILED',
+              `听悟服务器下载失败 (transId=${transId}, status=${download.status})`,
+              { transId, status: download.status, message: download.message });
+          }
+        }
+        await delay(TRANSCRIBE_POLL_INTERVAL_MS, undefined, { signal });
+      }
+    });
 }
 
 async function waitUntilExportReady(exportTaskId, cookie) {
@@ -187,6 +228,152 @@ export async function transcribeFile(
     duration: finishedItem.duration,
     wordCount: finishedItem.wordCount,
   };
+}
+
+function requireNetSourceUrl(fileUrl) {
+  let url;
+  try {
+    if (typeof fileUrl !== 'string') throw new Error('URL must be a string');
+    url = new URL(fileUrl);
+  } catch {
+    throw new GatewayError(400, 'INVALID_FILE_URL', 'fileUrl 必须是有效的 http(s) 音视频直链');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new GatewayError(400, 'INVALID_FILE_URL', '只支持不含用户名和密码的 http(s) 音视频直链');
+  }
+  // 不重新编码 URL, 避免改变源站签名参数. 此处也不探测或下载媒体内容.
+  return fileUrl.trim();
+}
+
+function checkNetSourceResource(data) {
+  if (data?.needLinkOssResource) {
+    throw new GatewayError(400, 'NET_SOURCE_OSS_REQUIRED', '听悟要求先绑定 OSS 资源, 请在听悟网页完成绑定后重试');
+  }
+}
+
+function matchesNetSourceFile(item, fileId) {
+  if (item.tag?.fileType !== 'net_source') return false;
+  try {
+    return JSON.parse(item.tag.originalTag).netSourceFileId === fileId;
+  } catch {
+    return false;
+  }
+}
+
+async function findNetSourceTranscript(fileId, dirId, cookie, signal) {
+  const matches = [];
+  for (let pageNo = 1; ; pageNo += 1) {
+    // showName 搜索使用异步索引, 实测刚创建的任务会漏掉. 按来源和文件夹分页再精确匹配.
+    const response = await getTransList({
+      pageNo, pageSize: 100, filter: { fileTypes: ['net_source'], dirId }, signal,
+    }, cookie);
+    const items = response.data ?? [];
+    matches.push(...items.filter((item) => matchesNetSourceFile(item, fileId)));
+    const pageSize = response.pageSize || 100;
+    if (items.length < pageSize || pageNo * pageSize >= response.total) break;
+  }
+  if (matches.length > 1) {
+    throw new GatewayError(502, 'NET_SOURCE_TASK_AMBIGUOUS', '同一来源文件关联了多个任务, 请通过 list 确认, 不要重复提交',
+      { fileId, transIds: matches.map((item) => item.transId), submitted: true });
+  }
+  return matches[0];
+}
+
+// 独立的直链编排: 听悟解析 -> 提交网络来源 -> 找到 transId -> 可选等待下载和转写.
+// 不调用 fetch(fileUrl) 或 OSS 上传, 失败时也不自动回退为本机下载.
+export async function transcribeUrl(
+  {
+    fileUrl,
+    showName,
+    lang = 'cn',
+    roleSplitNum = 0,
+    dirId = 0,
+    wait = false,
+    sourceTimeoutMs = NET_SOURCE_TIMEOUT_MS,
+    waitTimeoutMs = TRANSCRIBE_DEFAULT_TIMEOUT_MS,
+  },
+  cookie,
+) {
+  const url = requireNetSourceUrl(fileUrl);
+  validateTimeout(sourceTimeoutMs);
+  if (wait) validateTimeout(waitTimeoutMs);
+  if (showName !== undefined && (typeof showName !== 'string' || !showName.trim())) {
+    throw new GatewayError(400, 'INVALID_SHOW_NAME', 'showName 必须是非空字符串');
+  }
+  const parseContext = { phase: 'parse' };
+  const parsed = await withPollingTimeout(sourceTimeoutMs, '听悟解析直链超时, 尚未提交转写任务', parseContext,
+    async (signal) => {
+      const response = await parseNetSourceUrl({ url, signal }, cookie);
+      checkNetSourceResource(response.data);
+      const parseTaskId = response.data?.taskId;
+      if (!parseTaskId) throw new GatewayError(502, 'NET_SOURCE_PARSE_FAILED', '听悟未返回直链解析 taskId');
+      parseContext.parseTaskId = parseTaskId;
+      while (true) {
+        const query = await queryNetSourceParse({ taskId: parseTaskId, signal }, cookie);
+        checkNetSourceResource(query.data);
+        if (query.data?.status === 0) return query.data;
+        if (query.data?.status !== -1) {
+          throw new GatewayError(502, 'NET_SOURCE_PARSE_FAILED', '听悟无法解析此直链, 请确认链接可公开下载且指向音视频文件',
+            { parseTaskId, status: query.data?.status, message: query.data?.message });
+        }
+        await delay(NET_SOURCE_POLL_INTERVAL_MS, undefined, { signal });
+      }
+    });
+  // 此入口只转写单文件直链, 不自动将 RSS 或播放列表扩展成批量计费任务.
+  if (!Array.isArray(parsed.urls) || parsed.urls.length !== 1) {
+    throw new GatewayError(400, 'NET_SOURCE_FILE_COUNT', '直链必须解析出恰好一个音视频文件, 不支持批量来源',
+      { parseTaskId: parseContext.parseTaskId, fileCount: parsed.urls?.length ?? 0 });
+  }
+  const file = parsed.urls[0];
+  if (!file?.fileId || !Number.isFinite(file.size) || file.size <= 0 || typeof file.isVideo !== 'boolean') {
+    throw new GatewayError(502, 'NET_SOURCE_PARSE_FAILED', '听悟返回的来源文件元数据不完整', parseContext);
+  }
+  const resolvedShowName = showName ?? (file.showName || (file.isVideo ? '网络视频' : '网络音频'));
+  const submissionContext = {
+    phase: 'submit', parseTaskId: parseContext.parseTaskId, fileId: file.fileId, showName: resolvedShowName,
+  };
+  await withPollingTimeout(sourceTimeoutMs,
+    '提交直链请求超时, 任务可能已创建, 请通过 list 确认, 不要直接重复提交', submissionContext,
+    (signal) => putNetSourceUrl({
+      signal,
+      files: [{
+        fileId: file.fileId,
+        dirId,
+        fileSize: file.size,
+        tag: {
+          fileType: 'net_source', showName: resolvedShowName, lang, roleSplitNum,
+          translateSwitch: 0, transTargetValue: 0, client: 'web',
+          // putNetSourceUrl 不返回 transId. 实测 originalTag 会原样保留, 用唯一 fileId 关联,
+          // 而不是依赖同名任务、创建时间或列表首项, 从而隔离并发提交和历史任务.
+          originalTag: JSON.stringify({ isVideo: file.isVideo ? 1 : 0, netSourceFileId: file.fileId }),
+        },
+      }],
+    }, cookie));
+  const task = await withPollingTimeout(sourceTimeoutMs,
+    '直链已提交但尚未找到对应任务, 请稍后通过 list 确认, 不要重复提交',
+    { ...submissionContext, phase: 'resolve', submitted: true }, async (signal) => {
+      while (true) {
+        const item = await findNetSourceTranscript(file.fileId, dirId, cookie, signal);
+        if (item?.transId) return item;
+        await delay(NET_SOURCE_POLL_INTERVAL_MS, undefined, { signal });
+      }
+    });
+  checkTranscriptionStatus(task, task.transId, true);
+  const summary = {
+    transId: task.transId,
+    taskId: task.taskId,
+    parseTaskId: parseContext.parseTaskId,
+    fileId: file.fileId,
+    showName: resolvedShowName,
+    fileSize: file.size,
+    isVideo: file.isVideo,
+    source: 'net_source',
+    status: [4, 5].includes(task.status) ? 'downloading' : 'transcribing',
+  };
+  if (!wait && task.status !== 0) return summary;
+  const finished = task.status === 0 ? task
+    : await waitUntilTranscribed(task.transId, cookie, waitTimeoutMs, { netSource: true });
+  return { ...summary, status: 'done', duration: finished.duration, wordCount: finished.wordCount };
 }
 
 // 取解析后的转写结果：友好结构（text/paragraphs）+ 去掉内嵌 result 的原始数据

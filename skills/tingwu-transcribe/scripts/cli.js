@@ -20,6 +20,7 @@ import {
   GatewayError,
   requireCookie,
   transcribeFile,
+  transcribeUrl,
   getTranscriptResultParsed,
   exportTranscript,
   buildTxtContent,
@@ -29,6 +30,7 @@ const USAGE = `用法: node cli.js <command> [args] [options]
 
 命令:
   transcribe <文件路径|URL>   上传并转写音视频
+  transcribe-url <URL>       听悟服务器下载直链并转写, 本机不传输媒体
   status <transId>           查询转写状态
   result <transId>           获取转写结果（--text 只出全文纯文本）
   list                       列出转写任务
@@ -88,6 +90,28 @@ async function readStdin() {
 
 // ---- 命令实现 ----
 
+function getTranscribeOptions(flags) {
+  return {
+    showName: flags['show-name'],
+    lang: flags.lang,
+    roleSplitNum: Number(flags['role-split'] ?? 0) || 0,
+    dirId: Number(flags['dir-id'] ?? 0) || 0,
+    wait: Boolean(flags.wait),
+    // CLI 的超时单位为秒, core 使用毫秒.
+    waitTimeoutMs: Number(flags.timeout ?? 900) * 1000,
+  };
+}
+
+async function cmdTranscribeUrl({ positional, flags }) {
+  const fileUrl = requirePositional(positional, 0, '用法: transcribe-url <http(s)音视频直链> [--wait]');
+  const cookie = requireCookie();
+  printJson(await transcribeUrl({
+    ...getTranscribeOptions(flags),
+    fileUrl,
+    sourceTimeoutMs: Number(flags['source-timeout'] ?? 120) * 1000,
+  }, cookie));
+}
+
 async function cmdTranscribe({ positional, flags }) {
   const input = requirePositional(positional, 0, '用法: transcribe <本地文件路径|http(s)URL>');
   // Cookie 检查前置：缺失时立即报 COOKIE_MISSING，比文件读取错误对调用方更有引导性
@@ -111,15 +135,9 @@ async function cmdTranscribe({ positional, flags }) {
     filename = path.basename(input);
   }
   const summary = await transcribeFile({
+    ...getTranscribeOptions(flags),
     fileBuffer,
     filename,
-    showName: flags['show-name'],
-    lang: flags.lang,
-    roleSplitNum: Number(flags['role-split'] ?? 0) || 0,
-    dirId: Number(flags['dir-id'] ?? 0) || 0,
-    wait: Boolean(flags.wait),
-    // --timeout 单位为秒，与 README/references 约定一致，这里转毫秒
-    waitTimeoutMs: Number(flags.timeout ?? 900) * 1000,
   }, cookie);
   printJson(summary);
 }
@@ -217,6 +235,7 @@ async function cmdCookie({ positional }) {
 
 const COMMANDS = {
   transcribe: cmdTranscribe,
+  'transcribe-url': cmdTranscribeUrl,
   status: cmdStatus,
   result: cmdResult,
   list: cmdList,

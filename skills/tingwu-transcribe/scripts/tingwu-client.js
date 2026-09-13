@@ -1,7 +1,8 @@
 // 通义听悟网页版（tingwu.aliyun.com）私有 Web API 客户端。
 //
-// 协议特征（来自 2026-09-02 的真实抓包分析）：
-//   - 所有请求都是 POST + application/json，action 名同时出现在 query 与 body 里
+// 协议特征 (来自 2026-09-02 和 2026-09-13 的真实抓包分析):
+//   - 请求都是 POST + application/json, 常规接口在 query 和 body 中携带 action
+//   - 网络来源接口仅在 body 中携带 action, URL 只附加 c=web
 //   - 鉴权完全依赖浏览器同源 Cookie，没有 CSRF token、没有请求签名
 //   - 响应统一为 { code: "0", message, requestId, data, success }，code 非 "0" 即业务失败
 //
@@ -31,14 +32,14 @@ export class TingwuApiError extends Error {
   }
 }
 
-async function callTingwuApi({ apiPath, action, body, cookie, requireVersion = true }) {
+async function callTingwuApi({ apiPath, action, body, cookie, requireVersion = true, actionInQuery = true, signal }) {
   if (!cookie) {
     throw new TingwuApiError('网关尚未配置 cookie，请先通过 POST /cookie 提供纯 Cookie 值', {
       httpStatus: 401,
       code: 'COOKIE_MISSING',
     });
   }
-  const url = `${TINGWU_ORIGIN}${apiPath}?${action}&c=web`;
+  const url = `${TINGWU_ORIGIN}${apiPath}?${actionInQuery ? `${action}&` : ''}c=web`;
   const refererPath = action === 'getTransResult' || action === 'exportTrans' || action === 'getExportStatus'
     ? '/folders/0'
     : '/home';
@@ -50,6 +51,7 @@ async function callTingwuApi({ apiPath, action, body, cookie, requireVersion = t
       method: 'POST',
       headers: { ...BASE_HEADERS, referer: `${TINGWU_ORIGIN}${refererPath}`, cookie },
       body: JSON.stringify(payload),
+      signal,
     });
   } catch (cause) {
     throw new TingwuApiError(`请求听悟服务失败：${cause.message}`, { code: 'TINGWU_UNREACHABLE', detail: String(cause) });
@@ -111,24 +113,73 @@ export function syncPutLink({ fileLink, fileSize, transId }, cookie) {
   });
 }
 
-// 查询转写状态。status：0=转写完成，1=转写中，其余值视为异常（抓包样本有限，见 README）
-export function getTransStatus({ transIds, preview = 1 }, cookie) {
+// 直链解析由听悟服务器执行, 客户端不请求媒体源站.
+export function parseNetSourceUrl({ url, signal }, cookie) {
+  return callTingwuApi({
+    apiPath: '/api/trans/parseNetSourceUrl',
+    action: 'parseNetSourceUrl',
+    actionInQuery: false,
+    cookie,
+    signal,
+    body: { url },
+  });
+}
+
+// status: -1=解析中, 0=成功. data.urls 提供 fileId/size/isVideo/showName.
+export function queryNetSourceParse({ taskId, signal }, cookie) {
+  return callTingwuApi({
+    apiPath: '/api/trans/queryNetSourceParse',
+    action: 'queryNetSourceParse',
+    actionInQuery: false,
+    cookie,
+    signal,
+    body: { taskId },
+  });
+}
+
+// 成功响应可能是 data: [], 不能依赖此响应取得 transId.
+export function putNetSourceUrl({ files, signal }, cookie) {
+  return callTingwuApi({
+    apiPath: '/api/trans/request',
+    action: 'putNetSourceUrl',
+    actionInQuery: false,
+    cookie,
+    signal,
+    body: { files },
+  });
+}
+
+// 此处 status 与转写状态不是同一枚举: -1=下载中, 0=下载完成, 1/3/4=失败.
+export function queryNetSourceUpload({ transIds, signal }, cookie) {
+  return callTingwuApi({
+    apiPath: '/api/trans/request',
+    action: 'queryNetSourceUpload',
+    actionInQuery: false,
+    cookie,
+    signal,
+    body: { transIds },
+  });
+}
+
+// 转写状态: 0=完成, 1=转写中, 3=已上传待转写, 4=等待上传/下载, 5=上传/下载中.
+export function getTransStatus({ transIds, preview = 1, signal }, cookie) {
   return callTingwuApi({
     apiPath: '/api/trans/request',
     action: 'getTransStatus',
     cookie,
+    signal,
     body: { userId: '', transIds, preview },
   });
 }
 
 // 分页列出转写任务
 export function getTransList(
-  { pageNo = 1, pageSize = 20, filter = {}, orderType = 0, orderDesc = true, preview = 1 },
+  { pageNo = 1, pageSize = 20, filter = {}, orderType = 0, orderDesc = true, preview = 1, signal },
   cookie,
 ) {
   const fullFilter = {
     status: filter.status ?? [],
-    fileTypes: [],
+    fileTypes: filter.fileTypes ?? [],
     beginTime: filter.beginTime ?? '',
     mediaType: '',
     endTime: '',
@@ -143,6 +194,7 @@ export function getTransList(
     apiPath: '/api/trans/request',
     action: 'getTransList',
     cookie,
+    signal,
     body: { userId: '', filter: fullFilter, preview, pageNo, pageSize, orderType, orderDesc },
   });
 }
