@@ -126,6 +126,10 @@ async function main(): Promise<void> {
   initCookieSigning("attachments-check-key");
   const cookie = buildSessionCookie(createLoginSession("xyzen").token).split(";")[0];
 
+  // 本脚本自己挂 apiRequestSecurity，因此显式钉住开关姿态：附件语义不该随
+  // 部署环境的 PI_TEACHER_REQUEST_SECURITY 取值、或将来默认值变动而漂移。
+  process.env.PI_TEACHER_REQUEST_SECURITY = "true";
+
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "10mb" }));
@@ -619,6 +623,66 @@ async function main(): Promise<void> {
     console.log("\n[10] 全局不变量");
     const leaking = responseBodies.filter((body) => body.includes(homeDir) || body.includes("/tmp/"));
     check(`所有 ${responseBodies.length} 个响应体都不含绝对路径`, leaking.length === 0, leaking.slice(0, 2));
+
+    // ============ 11. request-security 总开关（默认关） ============
+    // 默认关闭是本仓库的刻意选择：关闭时两道校验都放行，打开时恢复 403。
+    // 注意必须用原始 socket：fetch/undici 会把调用方给的 Host 头丢掉，
+    // 用 fetch 根本打不到 Host 校验那一段，会得到一个「以为验了其实没验」的结论。
+    console.log("\n[11] request-security 开关");
+    {
+      const probeApp = express();
+      probeApp.use("/api", apiRequestSecurity);
+      probeApp.use("/api", (_req, res) => { res.json({ ok: true }); });
+      const probeServer = createServer(probeApp);
+      await new Promise<void>((resolve) => probeServer.listen(0, "127.0.0.1", resolve));
+      const probePort = (probeServer.address() as { port: number }).port;
+
+      const raw = (head: string): Promise<{ status: number; text: string }> => new Promise((resolve, reject) => {
+        const socket = connect({ host: "127.0.0.1", port: probePort }, () => {
+          socket.write(`${head}Connection: close\r\n\r\n`);
+        });
+        let data = "";
+        socket.setEncoding("utf8");
+        socket.on("data", (chunk) => { data += chunk; });
+        socket.on("error", reject);
+        socket.on("end", () => resolve({
+          status: Number(/^HTTP\/1\.1 (\d{3})/.exec(data)?.[1] ?? 0),
+          text: data.slice(data.indexOf("\r\n\r\n") + 4),
+        }));
+      });
+
+      // 三段请求：外部域名 Host、同源 Host + 跨站 Origin、同源 Host + 同源 Origin
+      const foreignHost = `GET /api/anything HTTP/1.1\r\nHost: evil.example.com\r\nOrigin: http://attacker.example.com\r\n`;
+      const crossOrigin = `GET /api/anything HTTP/1.1\r\nHost: 127.0.0.1:${probePort}\r\nOrigin: http://attacker.example.com\r\nSec-Fetch-Site: cross-site\r\n`;
+      const sameOrigin = `GET /api/anything HTTP/1.1\r\nHost: 127.0.0.1:${probePort}\r\nOrigin: http://127.0.0.1:${probePort}\r\nSec-Fetch-Site: same-origin\r\n`;
+      const errorOf = (text: string): string => { try { return JSON.parse(text).error; } catch { return ""; } };
+
+      try {
+        delete process.env.PI_TEACHER_REQUEST_SECURITY;
+        check("未设置（默认）：不做 Host 校验，外部域名 Host 放行", (await raw(foreignHost)).status === 200);
+        check("未设置（默认）：不做同源校验，跨站 Origin 放行", (await raw(crossOrigin)).status === 200);
+
+        process.env.PI_TEACHER_REQUEST_SECURITY = "false";
+        check("取值 false：同样关闭", (await raw(foreignHost)).status === 200);
+        process.env.PI_TEACHER_REQUEST_SECURITY = "TURE";
+        check("取值拼错（TURE）：保持默认关闭，不会误开防护", (await raw(foreignHost)).status === 200);
+
+        process.env.PI_TEACHER_REQUEST_SECURITY = "true";
+        const hostBlocked = await raw(foreignHost);
+        check("取值 true：外部域名 Host 被 403", hostBlocked.status === 403, { status: hostBlocked.status });
+        check("  ↳ 错误信息为 Invalid Host header", errorOf(hostBlocked.text) === "Invalid Host header", { body: hostBlocked.text.slice(0, 120) });
+        const originBlocked = await raw(crossOrigin);
+        check("取值 true：跨站 Origin 被 403", originBlocked.status === 403, { status: originBlocked.status });
+        check("  ↳ 错误信息为 Cross-origin API requests are not allowed", errorOf(originBlocked.text) === "Cross-origin API requests are not allowed", { body: originBlocked.text.slice(0, 120) });
+        check("取值 true：同源请求仍 200", (await raw(sameOrigin)).status === 200);
+
+        process.env.PI_TEACHER_REQUEST_SECURITY = "1";
+        check("取值 1：也算开启", (await raw(foreignHost)).status === 403);
+      } finally {
+        delete process.env.PI_TEACHER_REQUEST_SECURITY;
+        probeServer.close();
+      }
+    }
 
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
   } finally {
