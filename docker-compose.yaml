@@ -12,5 +12,10 @@ services:
       # Pi 配置：models.json（provider 与 API key）、settings.json（默认模型），以及 skills/ 子目录（ADR-0029）。
       - ${HOST_PI_AGENT_DIR:-./pi-agent}:/root/.pi/agent
     environment:
-      # 用非 localhost / 非 IP 的域名访问时填写此处，CROS限制
+      # Host 白名单与同源校验的总开关（防 DNS rebinding / CSRF），默认关闭。
+      # 关闭时用任意域名反代访问都不会被拦；要开启就设为 true，
+      # 开启后用非 localhost / 非 IP 的域名访问还必须同时填下面的 PI_TEACHER_HOSTNAME，否则 403。
+      - PI_TEACHER_REQUEST_SECURITY=${PI_TEACHER_REQUEST_SECURITY:-}
+      # 仅在上面的开关开启时生效：允许访问的域名（不是 CORS，是 Host 白名单）。
+      # 填主机名，不带端口与协议；多个用逗号分隔的 PI_TEACHER_ALLOWED_HOSTS 也可以。
       - PI_TEACHER_HOSTNAME=${PI_TEACHER_HOSTNAME:-}
