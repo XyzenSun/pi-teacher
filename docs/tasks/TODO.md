@@ -1,5 +1,11 @@
 # TODO
 
+## 本阶段：两个新任务立项（2026-09-13，待实施）
+
+**prompt-and-skill-polish（提示词优化与 skill 完善）**：PRD 见 `prompt-and-skill-polish.md`。两个子目标：① sbx 源码从上游 `sandbox-cli` 仓库转入 `skills/sbx/sourcecode/`，**权威转移**（用户已定：上游归档，本仓库成为唯一源），分发保持 esbuild 单文件 node cli，决策记 ADR-0043 并给 ADR-0040 补状态行；② 提示词优化——**围绕使用痛点**（用户已定范围，痛点清单待用户补充），提示词面为 `defaults.ts` 六类常量 + 五个 SKILL.md，每条痛点定位到具体提示词段、改点确认后再动手。
+
+**logging-system（日志系统）**：PRD 见 `logging-system.md`。已定约束：第三方库、统一输出到 stderr（「stdr」所指待确认）、debug / info / warn / error 四等级；库选型、格式、等级开关、HTTP 访问日志扩面与否等待商量清单共 7 项，实施前与用户逐项过。
+
 ## 上一阶段：模型目录脱节与高级设置白屏修复（已完成，WebUI 用户验收通过）
 
 **model-catalog-fingerprint（2026-09-12）**：两个前端 bug 的根因均在后端，已修复并重启 dev 后端（端口 39871），**用户 WebUI 验收通过**（模型选择器恢复、高级设置正常）。
