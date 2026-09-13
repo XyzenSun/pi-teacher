@@ -1,7 +1,6 @@
 services:
   pi-teacher:
-    build: .
-    image: pi-teacher:local
+    image: ghcr.io/xyzensun/pi-teacher:latest
     # PID 1 用 tini 转发信号：SIGTERM 才能进 registerSignalHandlers，让会话先 session_shutdown 再退出。
     init: true
     restart: unless-stopped
