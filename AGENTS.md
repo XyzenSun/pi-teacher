@@ -36,8 +36,8 @@ pi-teacher/
     前端模板/                    ← 设计稿与配色（改视觉前看 DESIGN.md）
     THIRD-PARTY-NOTICES.md      ← 自 pi-web 移植代码的许可声明
     deploy.md                   ← Docker 部署：挂载变量、内置 skill 覆盖规则、升级、备份、常见错误
-  Dockerfile / docker-entrypoint.sh / compose.yaml
-                                ← 容器内完全按 Pi 约定（~/pi-teacher、~/.pi/agent、~/.pi/agent/skills）；宿主路径由 HOST_* 变量决定，默认 ./pi-teacher 与 ./pi-agent
+  Dockerfile / docker-entrypoint.sh / compose.yaml / docker-compose.yaml
+                                ← 容器内完全按 Pi 约定（~/pi-teacher、~/.pi/agent、~/.pi/agent/skills）；宿主路径由 HOST_* 变量决定，默认 ./pi-teacher 与 ./pi-agent。两份 compose 共存：compose.yaml 源码构建 + healthcheck（开发验证），docker-compose.yaml 拉 GHCR 镜像（开源发布，与 main 分支同步维护）
   skills/                       ← 内置 skill（tavily-search / exa-search / pullpage / sbx / tingwu-transcribe，ADR-0040 / 0041 / 0042）：COPY 进镜像，entrypoint 每次启动覆盖进 ~/.pi/agent/skills 同名目录
 ```
 
@@ -86,7 +86,7 @@ docker compose build && docker compose up -d   # 容器部署；docker compose s
 - secret（API key、`$ENV` / `!command` 引用、header 值）只在 `server/src/config/pi-config.ts` 内处理，出口一律折叠为布尔或 `SECRET_MASK`；日志、测试输出、错误响应、commit 同样不含 secret。`user_env` 表的值不属于这条边界：明文存、明文回显（ADR-0034），只有日志仍只打 key 名。
 - 写用户配置文件一律临时文件 + 原子替换，校验失败保持原文件字节与权限不变。
 - 端口探测用 `ss -lptn 'sport = :PORT'`，停后台服务用 `kill %1` 或记录的 PID；后台起服务用 `(setsid cmd &)`，连续多轮跑验证脚本时每轮换日志文件名并先 `pkill -f <脚本名>` 清场——残留进程会往被截断的同名日志写旧结果，造成「假失败」。
-- 已有用户修改保持原状，不恢复不覆盖；开发阶段不写 README，新文档放 `docs/` 而不是根目录。
+- 已有用户修改保持原状，不恢复不覆盖；根 README.md 是 main 分支的开源使用文档，在本分支维护后随同步流程带过去；除此之外开发阶段不写 README，新文档放 `docs/` 而不是根目录。
 - 未经用户明确要求不 commit、不 push。
 - 子代理统一用 `haiku`。
 

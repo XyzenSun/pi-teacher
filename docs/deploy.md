@@ -2,6 +2,8 @@
 
 单机、单用户部署，基于 `Dockerfile` + `docker-entrypoint.sh` + `compose.yaml`（决策背景：ADR-0015 镜像选型、ADR-0029 目录挂载、ADR-0034 用户环境变量、ADR-0036 维护提醒）。目标形态是：克隆仓库，`docker compose up -d`，一键运行。
 
+仓库里有两份 compose，分工不同：`compose.yaml` 是源码构建版（`build: .` + healthcheck，本仓库开发验证用）；`docker-compose.yaml` 是镜像拉取版（GHCR `ghcr.io/xyzensun/pi-teacher:latest`，与 main 分支同步维护，面向开源使用者）。两者挂载与环境变量语义一致，本文以 `compose.yaml` 为准叙述。
+
 ## 一句话模型
 
 容器内**完全遵循 Pi 的约定**：进程以 root 运行，业务数据在 `~/pi-teacher`，Pi 配置在 `~/.pi/agent`，skills 在 `~/.pi/agent/skills`——和在宿主机上直接 `npm run dev` 一模一样，代码里没有任何容器专用路径。宿主机上这两个目录放在哪里由 compose 的两个变量决定，默认就平铺在 `compose.yaml` 旁边（首次启动自动创建）：
