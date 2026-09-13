@@ -21,5 +21,3 @@ server/dev-data/
 /AGENTS.md
 /CLAUDE.md
 
-# sbx 重建说明含私有上游地址，仅私有分支保留，开源快照排除
-/skills/sbx/sourcecode/README.md
