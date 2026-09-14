@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
+@import "yet-another-react-lightbox/styles.css";
 
 /*
  * Atelier Mind 设计令牌（前端模板/DESIGN.md）：暖纸白底、深板岩主色、鼠尾草强调。
@@ -125,3 +126,15 @@
 /* 第三栏宽度只有 22rem，阅读字号会挤压行宽；在窄栏容器内统一降一档 */
 .aside-compact .prose-chat { @apply text-[13px] leading-[1.6]; }
 .mermaid-block svg { max-width: 100%; height: auto; }
+
+/*
+ * yet-another-react-lightbox 主题对齐 Atelier Mind（图片展示形态 C：缩略图 + 灯箱）。
+ * 变量名是库的公开主题接口；遮罩用 primary 半透明（与对比稿一致），按钮纸白。
+ * 必须放在库样式（文件头部 @import）之后，同特异性下后者胜出。
+ */
+.yarl__root {
+  --yarl__color_backdrop: rgba(30, 37, 43, 0.82);
+  --yarl__color_button: #f9f9f8;
+  --yarl__color_button_active: #c7ebda;
+  --yarl__slide_icon_loading_color: #8a8e94;
+}
