@@ -20,8 +20,9 @@ function writeIfMissing(filePath: string, content: string): void {
 }
 
 /**
- * homeDir 下的全局文件与目录（docs/数据库与目录结构设计.md「目录布局」）。
- * 全局 AGENTS.md 靠 Pi 的祖先目录发现进入每个会话的 system prompt（ADR-0029），
+ * homeDir 下的全局文件与目录：~/pi-teacher/ 下的 AGENTS.md、USER.md、materials/
+ * 与 assets/ 等，由本函数幂等补建（只补缺失，不覆盖已有内容）。
+ * 全局 AGENTS.md 靠 Pi 的祖先目录发现进入每个会话的 system prompt，
  * 因此它必须在任何会话创建之前就存在于 work_path 的祖先位置。
  */
 export function ensureGlobalLayout(homeDir: string): void {
@@ -54,6 +55,6 @@ export function seedApplication(db: Database.Database, homeDir: string): void {
   mkdirSync(path.join(taSession.work_path, SESSION_FILES_DIR_NAME), { recursive: true });
   // 初始化重入只补缺失文件，已有对话保持创建时的投影，不受模板后续编辑污染。
   if (!existsSync(path.join(taSession.work_path, "AGENTS.md"))) projectAgentsMd(db, taSession.work_path, taSession.agents_md_id);
-  // 助教不再有教学风格（ADR-0035）：旧数据目录里的 style.md 是程序投影而非用户内容，直接删掉。
+  // 助教不再有教学风格：旧数据目录里的 style.md 是程序投影而非用户内容，直接删掉。
   rmSync(path.join(taSession.work_path, "style.md"), { force: true });
 }

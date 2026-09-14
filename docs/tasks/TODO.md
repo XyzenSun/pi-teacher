@@ -6,6 +6,8 @@
 
 **logging-system（日志系统）**：PRD 见 `logging-system.md`。已定约束：第三方库、统一输出到 stderr（「stdr」所指待确认）、debug / info / warn / error 四等级；库选型、格式、等级开关、HTTP 访问日志扩面与否等待商量清单共 7 项，实施前与用户逐项过。
 
+**comment-self-containment（代码注释自我完备化）**：PRD 见 `comment-self-containment.md`。纯注释改动、零运行影响：把生产代码注释里的 `ADR-00xx` 编号（`server/src` 除 `verify/` 57 处 + `web/src` 10 处）与私有 `docs/` 指针（13 处）去掉，把「为什么这么做」直接写进注释——核心理由是开源 `main` 分支的 `.gitignore` 排除 `/docs/`，这些指针在读者侧是悬空乱码。范围用户已定：仅生产代码，不含 `verify/`、`skills/`、Docker/compose；不加防回归约束、不写 ADR。待用户确认子项：pi-web 移植文件的 MIT 许可头改为内联归属、不再指向 `docs/THIRD-PARTY-NOTICES.md`。
+
 ## 上一阶段：模型目录脱节与高级设置白屏修复（已完成，WebUI 用户验收通过）
 
 **model-catalog-fingerprint（2026-09-12）**：两个前端 bug 的根因均在后端，已修复并重启 dev 后端（端口 39871），**用户 WebUI 验收通过**（模型选择器恢复、高级设置正常）。

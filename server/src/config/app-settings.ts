@@ -1,9 +1,9 @@
 /**
- * pi-teacher 自己的业务运行设置（ADR-0036）：SQLite `setting` 表，键值都是文本。
+ * pi-teacher 自己的业务运行设置：SQLite `setting` 表，键值都是文本。
  * 与 Pi 的 `settings.json`（pi-config.ts）无关——那是 SDK 定义字段的文件，塞业务字段
  * 进去等于依赖它对未知键的容忍度。缺行即取代码默认值，因此不需要 seed。
  *
- * 一个共用间隔与四段文案（ADR-0036 / ADR-0039）：
+ * 一个共用间隔与四段文案：
  * - `reminder_interval_turns`：每隔多少轮用户消息在消息末尾追加一次维护提醒；0 表示全部关闭
  * - `reminder_text_make_card_on` / `reminder_text_make_card_off` / `reminder_text_ta`：三种基础文案
  * - `reminder_text_learning_essence`：仅学习会话在基础文案后追加的精华维护提醒

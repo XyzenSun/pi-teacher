@@ -41,7 +41,7 @@ export function AssistantPanel({ taSessionId, mainConversationId }: AssistantPan
     }
   };
 
-  // 清除（ADR-0035）：后端换新 JSONL 并已常驻重开，前端只需重连 SSE；connected 事件会重新拉取（空）历史。
+  // 清除：后端换新 JSONL 并已常驻重开，前端只需重连 SSE；connected 事件会重新拉取（空）历史。
   const clearConversation = async () => {
     setClearing(true);
     setClearError(null);

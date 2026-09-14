@@ -1,6 +1,7 @@
-// 参考 pi-web v0.9.0（MIT License）lib/streaming-message.ts 与 normalize.ts 重写，
-// 见 docs/THIRD-PARTY-NOTICES.md。流式 assistant 消息按 contentIndex 逐块拼接，
-// *_end 事件用完整内容覆盖增量结果，避免丢包造成的文本错位。
+// 参考 pi-web v0.9.0（MIT License，Copyright (c) 2026 agegr，
+// https://github.com/agegr/pi-web）lib/streaming-message.ts 与 normalize.ts 重写。
+// 流式 assistant 消息按 contentIndex 逐块拼接，*_end 事件用完整内容覆盖增量结果，
+// 避免丢包造成的文本错位。
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ToolCallContent } from "../api/types.ts";
 
 export interface StreamingState {

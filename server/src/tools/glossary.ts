@@ -56,7 +56,7 @@ export function createGlossaryTools(ctx: SessionToolContext): ToolDefinition[] {
             const gate = assertToolAllowed(ctx, "glossary_list");
             if (!gate.allowed) return toolResult(gate.reason);
 
-            // 只返回 normal：proposed 未确认不能影响讲解行为（ADR-0005）
+            // 只返回 normal：proposed 未确认不能影响讲解行为
             const rows = db
                 .prepare("SELECT id, term FROM glossary WHERE status = 'normal' ORDER BY term")
                 .all();

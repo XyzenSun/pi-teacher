@@ -55,7 +55,7 @@ export function createGlossaryRouter(state: AppState): Router {
     res.json({ terms });
   });
 
-  // POST /api/glossary —— 用户手动添加：直接 normal（手动录入即确认，见 ADR-0005）
+  // POST /api/glossary —— 用户手动添加：直接 normal（手动录入即用户确认）
   router.post("/", (req: Request, res: Response) => {
     const body = readBody(req.body);
     // term 是唯一键，长度给紧一点：它是一个术语名，不是一段定义

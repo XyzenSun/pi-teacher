@@ -4,13 +4,12 @@
  * attachmentIds / name 还原成真实图片内容也复用本模块——「能下载的」与「能喂给
  * 模型的」永远走同一套校验，不可能出现两套口径。
  *
- * 存放位置：当前 Pi Session 的 `work_path/files/`（Session Files，ADR-0038；HTTP 路由与
+ * 存放位置：当前 Pi Session 的 `work_path/files/`（Session Files；HTTP 路由与
  * 本模块名保留 attachments——那是「上传」这个动作的名字）。这里不建任何数据库表——附件的
  * 唯一事实来源是磁盘：模型自己在 files/ 下写出的图片也必须能被列出、下载、引用，所以
  * 列表一律 readdir 现算，绝不返回数据库里登记过、磁盘上已不存在的「假文件」。
  *
- * 安全边界（移植 pi-web v0.8.11 lib/file-upload.ts + path-security.ts 的思路，
- * 见 docs/pi-web-研究/04-API与基础设施.md §2.4）：
+ * 安全边界（移植 pi-web v0.8.11 lib/file-upload.ts + path-security.ts 的思路）：
  *   1. 文件名必须是纯 basename：拒 `.`/`..`/`/`/`\`/控制字符/隐藏名/超长名；
  *   2. 目录侧双段校验：lstat 拒绝 files 目录自身是符号链接（否则一个链接就能把
  *      上传写到工作目录外），再对 realpath 做词法包含判定；
@@ -19,8 +18,8 @@
  *   4. 对外只出现相对路径（`files/<name>`）：绝对路径与工作目录既不进成功
  *      响应，也不进错误消息（db/types.ts 对 work_path 的约定）。
  *
- * 刻意**不**做 AI 文件沙箱——沙箱是部署层的事（ADR-0015 Docker）。本模块防的是
- * HTTP 侧的路径穿越与浏览器侧的内容执行，不是模型的文件权限。
+ * 刻意**不**做 AI 文件沙箱——沙箱是部署层的事（容器与远程执行 skill 负责系统边界）。
+ * 本模块防的是 HTTP 侧的路径穿越与浏览器侧的内容执行，不是模型的文件权限。
  */
 import {
   closeSync,
@@ -42,7 +41,7 @@ import { HttpError } from "../routes/http.ts";
 import { isPathWithinRoots } from "../security/path-security.ts";
 import { getPiSession, SESSION_FILES_DIR_NAME } from "./repository.ts";
 
-/** 改名前的目录名（ADR-0038），只在启动迁移里出现；之后程序不再认识它。 */
+/** 改名前的目录名，只在启动迁移里出现；之后程序不再认识它。 */
 const LEGACY_ATTACHMENTS_DIR_NAME = "attachments";
 
 /** 单个附件上限。必须与 ATTACHMENT_BODY_LIMIT 同源，否则会出现「过了 body 解析
@@ -284,7 +283,7 @@ function resolveAttachmentsDirForRead(row: PiSessionRow): string | null {
 }
 
 /**
- * 一次性迁移（ADR-0038）：旧部署的 `attachments/` 改名为 `files/`。只在启动时跑一遍：
+ * 一次性迁移：旧部署的 `attachments/` 改名为 `files/`。只在启动时跑一遍：
  * `attachments/` 是真目录且 `files/` 不存在才 rename；两者并存不动、只记日志（相对信息，
  * 不打绝对路径）。行不存在于磁盘的会话直接跳过。之后程序不再认识 `attachments/`。
  */
@@ -554,7 +553,7 @@ export function readAttachment(
   return { meta: result.meta, inlineSafe: result.inlineSafe, data: result.data ?? Buffer.alloc(0) };
 }
 
-/** 能作为图片块直接进对话的附件（ADR-0038）：其余文件只把路径告诉模型。 */
+/** 能作为图片块直接进对话的附件：其余文件只把路径告诉模型。 */
 export function isImageAttachment(meta: Pick<AttachmentMeta, "mimeType">): boolean {
   return INLINE_SAFE_IMAGE_MIME_TYPES.has(meta.mimeType);
 }
@@ -567,7 +566,7 @@ export function formatAttachmentSize(bytes: number): string {
 }
 
 /**
- * 非图片附件的注入文案（ADR-0038）：一行自然语言告诉模型有文件、在哪、多大，由它自己决定
+ * 非图片附件的注入文案：一行自然语言告诉模型有文件、在哪、多大，由它自己决定
  * 用什么工具读；后端不做内容转换。图片已随消息作为图片块发送，不再列出。
  */
 export function describeNonImageAttachments(attachments: readonly AttachmentMeta[]): string {

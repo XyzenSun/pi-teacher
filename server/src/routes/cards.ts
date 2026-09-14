@@ -5,7 +5,7 @@
  * 状态机（数据库与目录结构设计.md「status 三档」）：
  *   proposed --confirm--> normal --delete--> deleted --restore--> normal | proposed
  *   proposed --reject--> deleted
- *   手动新建 --> normal（用户意图本身即确认，见 ADR-0009）
+ *   手动新建 --> normal（用户意图本身即确认）
  *
  * card_schedule 只在卡片首次成为 normal 时创建，软删**不删**调度行；因此
  * 恢复时有调度行的卡直接回 normal（复习进度原样回来），没有的回 proposed。

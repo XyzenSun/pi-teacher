@@ -5,7 +5,7 @@ import { ErrorLine, useSubmit } from "../ui/form.tsx";
 import { ConfirmDialog } from "../ui/Overlays.tsx";
 
 /**
- * 用户环境变量（ADR-0034）：SQLite 是唯一源，后端保存后立即写进自己的 process.env，
+ * 用户环境变量：SQLite 是唯一源，后端保存后立即写进自己的 process.env，
  * 老师下一次调用 skill 的子进程就能拿到，不用重开对话。
  *
  * 值明文存储、明文回显：数据库本身不加密，界面再遮一层没有意义。内置项是产品自带

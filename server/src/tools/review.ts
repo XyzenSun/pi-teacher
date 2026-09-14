@@ -6,7 +6,7 @@ import { applyRatings, selectDueCards, countDueCards } from "../fsrs/service.ts"
 /**
  * review_* 工具组：取卡与判定。
  *
- * 学习对话里这两个是反模式（ADR-0026）——工具不拦、提示词管；
+ * 学习对话里这两个是反模式——工具不拦、提示词管；
  * 用户明确要求穿插复习时照做。nums 上限 100：一次取上千张会爆上下文，
  * 积压靠「取卡 → 复习 → 判定 → 再取」循环消化。
  */

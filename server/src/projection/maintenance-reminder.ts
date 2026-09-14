@@ -1,5 +1,5 @@
 /**
- * 维护提醒（ADR-0036 / ADR-0039）：每隔 N 轮把 <system-reminder> 直接拼在用户消息末尾，
+ * 维护提醒：每隔 N 轮把 <system-reminder> 直接拼在用户消息末尾，
  * 基础文案提醒偏好 / 用户信息 / 卡片 / 会话级要求，只有学习会话同轮追加精华维护提醒。
  * 判断轮次与类型在程序，是否维护及维护内容由模型决定。
  *
@@ -17,7 +17,7 @@ import type { ReminderKind } from "../prompts/defaults.ts";
 export type { ReminderKind };
 export { readReminderText } from "../config/app-settings.ts";
 
-/** 助教不维护全局偏好与用户信息（ADR-0035），只提醒它维护「用户对你的要求」；学习 / 复习按制卡开关。 */
+/** 助教不维护全局偏好与用户信息，只提醒它维护「用户对你的要求」；学习 / 复习按制卡开关。 */
 export function pickReminderKind(spaceType: SpaceType, makeCardEnabled: boolean): Exclude<ReminderKind, "learningEssence"> {
   if (spaceType === "ta") return "ta";
   return makeCardEnabled ? "makeCardOn" : "makeCardOff";

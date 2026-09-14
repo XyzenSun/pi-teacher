@@ -43,7 +43,7 @@ export function createWorkspacesRouter(state: AppState): Router {
   });
 
   /**
-   * 删 Space = 逐条真删除其 Pi Session（ADR-0037：行 + JSONL），再删 space 行。
+   * 删 Space = 逐条真删除其 Pi Session（行 + JSONL），再删 space 行。
    * 运行中的对话先 abort 再 shutdown——用户已在 ConfirmDialog 确认，不再用 409 挡。
    * 工作目录里的用户产出与上传文件保留，界面确认文案如此说明。
    */

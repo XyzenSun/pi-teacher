@@ -25,8 +25,8 @@ export function readGlobalUserPreferences(homeDir: string): string {
 
 /**
  * 拼出 appendSystemPrompt 的固定段落：全局 USER.md 与会话 style.md 缺失的层省略对应标签块；
- * 会话级引导块**无条件**附带（ADR-0033 原话「无论文件是否存在都输出」）——维护提醒
- * （ADR-0036）会让模型「更新到 pi-session-user.md」，模型必须事先知道这个文件是什么，
+ * 会话级引导块**无条件**附带（无论文件是否存在都输出）——维护提醒
+ * 会让模型「更新到 pi-session-user.md」，模型必须事先知道这个文件是什么，
  * 而助教几乎总处于 USER.md 为空且无风格的状态。文件是否存在由模型自己用工具看。
  */
 export function buildAppendedSystemPrompt(homeDir: string | undefined, workPath: string): string {

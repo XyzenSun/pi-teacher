@@ -66,7 +66,7 @@ function ProviderJsonEditor({ providerId, secretMaskHint, onSaved }: {
 }
 
 /**
- * 维护提醒间隔（ADR-0036）：存在 pi-teacher 自己的 setting 表，不进 settings.json。
+ * 维护提醒间隔：存在 pi-teacher 自己的 setting 表，不进 settings.json。
  * 失焦或 Enter 才保存；输入非法时不发请求，恢复成当前生效值并提示。
  */
 function ReminderIntervalField({ value, onSaved }: { value: number; onSaved: (app: PiSettingsResponse["app"], message: string) => void }) {
@@ -120,7 +120,7 @@ const REMINDER_KIND_LABELS: Record<ReminderKind, { label: string; hint: string }
 };
 
 /**
- * 维护提醒文案（ADR-0036 / ADR-0039）：整段原样拼到用户消息末尾，含 <system-reminder> 标签。
+ * 维护提醒文案：整段原样拼到用户消息末尾，含 <system-reminder> 标签。
  * 后端把空串视为「恢复出厂文案」并删行，所以「恢复默认」就是提交空串，回包里带的是出厂文案。
  */
 function ReminderTextField({ kind, value, onSaved }: {

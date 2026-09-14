@@ -1,5 +1,5 @@
-// 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）lib/file-fuzzy.ts。
-// 原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。
+// 移植自 pi-web v0.9.0（MIT License，Copyright (c) 2026 agegr，
+// https://github.com/agegr/pi-web）lib/file-fuzzy.ts。
 // Pure helpers for the chat input's @ file autocomplete. Mirrors the pi TUI's
 // behavior: @ triggers at line start or after whitespace, entries are ranked
 // with the TUI's scoreEntry ladder, and completions insert "@relative/path ".

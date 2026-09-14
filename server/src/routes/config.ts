@@ -81,7 +81,7 @@ export function createConfigRouter(state: AppState): Router {
   });
 
   // 运行设置分两半：`settings` 是 Pi 的 settings.json 受控字段，`app` 是 pi-teacher 自己的
-  // 业务设置（setting 表，ADR-0036）。同一个 PATCH 可以混着传，路由先按字段名拆开。
+  // 业务设置（setting 表）。同一个 PATCH 可以混着传，路由先按字段名拆开。
   const settingsView = () => ({ settings: readSettingsJson(state.homeDir), app: readAppSettings(state.db), defaultModel: readDefaultModel(state.homeDir) });
 
   router.get("/settings", (_req, res) => {
@@ -114,7 +114,7 @@ export function createConfigRouter(state: AppState): Router {
     });
   }
 
-  // 用户环境变量（ADR-0034）：表是唯一源，保存 / 删除后立即同步 process.env，skill 子进程下次调用即生效。
+  // 用户环境变量：表是唯一源，保存 / 删除后立即同步 process.env，skill 子进程下次调用即生效。
   router.get("/user-env", (_req, res) => {
     res.json({ items: listUserEnv(state.db) });
   });
