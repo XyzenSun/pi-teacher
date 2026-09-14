@@ -48,7 +48,7 @@ React 19 + TypeScript + Vite 7 + Tailwind v4，无组件库。三栏布局：左
 | --- | --- |
 | `tavily-search` / `exa-search` / `pullpage` | 零依赖 Node 单文件脚本（脚本本身即源码，`scripts/` 下直接改） |
 | `sbx` | esbuild bundle 单文件（4.4M，重建方法见 `skills/sbx/sourcecode/README.md`） |
-| `tingwu-transcribe` | 零依赖 Node skill（Cookie 鉴权，详见 ADR-0042）；已在上游基础上扩展听悟服务器直链转写（net_source，见 skill 内 references/net-source.md） |
+| `tingwu-transcribe` | 上游原样接入的零依赖 Node skill（Cookie 鉴权，详见 ADR-0042） |
 
 机制（ADR-0029 / 0040 / 0041 / 0042）：`skills/` 在构建时 COPY 进镜像 `/app/skills`；`docker-entrypoint.sh` 每次启动把每个内置 skill **先删同名目录再整目录复制**进 `~/.pi/agent/skills`——升级镜像即升级内置 skill，用户自建 skill 目录不受影响。Pi 自动发现 `~/.pi/agent/skills/` 下含 `SKILL.md` 的目录，把 `name` / `description` 注入系统提示词的 `<available_skills>`；「何时用哪个 skill」只写在各自 description 里，**不进全局 AGENTS.md**。新增 skill 只需往 `skills/` 加目录 + 重建镜像，后端零改动；若需要新密钥，才动 `BUILTIN_USER_ENV`（`server/src/config/user-env.ts`）。
 
