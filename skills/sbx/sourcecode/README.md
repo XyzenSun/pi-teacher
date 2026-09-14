@@ -1,6 +1,6 @@
 # sbx 源码（本目录即权威）
 
-`skills/sbx/scripts/sbx`（4.4M 单文件 node cli）由本目录的 TypeScript 源码用 esbuild 打包.
+`skills/sbx/scripts/sbx`（4.4M 单文件 node cli）由本目录的 TypeScript 源码用 esbuild 打包而来。**sbx 的权威源码就在这里**——2026-09-13 自上游仓库 `sandbox-cli`（npm 包 `@xyzensun/sbx`）0.1.0 整体迁入后，上游归档不再维护，此后所有改动直接改本目录（决策见 ADR-0043）。
 
 ## 目录内容
 
