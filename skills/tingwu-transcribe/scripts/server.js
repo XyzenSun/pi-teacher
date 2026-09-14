@@ -6,7 +6,6 @@
 //   - 默认监听 0.0.0.0 以便局域网访问；网关持有登录 Cookie，请仅在可信网络使用
 //   - /transcribe 一次调用自动编排「generatePutLink -> OSS 上传 -> syncPutLink」，
 //     调用方无需感知听悟协议细节
-//   - /transcribe-url 独立编排听悟服务器下载直链, 不改变原有 /transcribe 行为
 //   - 所有听悟业务错误统一转换为 { error, code, detail } 的 JSON 响应
 import http from 'node:http';
 import fs from 'node:fs';
@@ -26,7 +25,6 @@ import {
   GatewayError,
   requireCookie,
   transcribeFile,
-  transcribeUrl,
   getTranscriptResultParsed,
   exportTranscript,
   buildTxtContent,
@@ -66,47 +64,12 @@ async function parseMultipartFormData(req) {
   return webRequest.formData();
 }
 
-function getWaitOptions(url) {
-  return {
-    wait: ['1', 'true'].includes(url.searchParams.get('wait') ?? ''),
-    waitTimeoutMs: Number(url.searchParams.get('waitTimeout') ?? WAIT_TIMEOUT_DEFAULT_SECONDS) * 1000,
-  };
-}
-
-// ---- /transcribe-url: 独立 JSON 入口, 不读取或代理下载媒体文件 ----
-
-async function handleTranscribeUrl(req, resp, url) {
-  const cookie = requireCookie();
-  if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
-    throw new GatewayError(415, 'JSON_CONTENT_TYPE_REQUIRED', 'POST /transcribe-url 只接受 application/json');
-  }
-  let body;
-  try {
-    body = JSON.parse((await readBodyBuffer(req)).toString('utf-8'));
-  } catch {
-    throw new GatewayError(400, 'INVALID_JSON', '请求体必须是有效 JSON 对象');
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new GatewayError(400, 'INVALID_JSON', '请求体必须是 JSON 对象');
-  }
-  if (!body.fileUrl) throw new GatewayError(400, 'MISSING_FILE_URL', 'JSON 请求体必须包含 fileUrl 字段');
-  const summary = await transcribeUrl({
-    fileUrl: body.fileUrl,
-    showName: body.showName,
-    lang: body.lang ?? 'cn',
-    roleSplitNum: Number(body.roleSplitNum ?? 0) || 0,
-    dirId: Number(body.dirId ?? 0) || 0,
-    ...getWaitOptions(url),
-    sourceTimeoutMs: Number(url.searchParams.get('sourceTimeout') ?? 120) * 1000,
-  }, cookie);
-  sendJson(resp, 201, summary);
-}
-
 // ---- /transcribe：三种请求方式（multipart / JSON fileUrl / 裸 body）归一化后交给 core ----
 
 async function handleTranscribe(req, resp, url) {
   const cookie = requireCookie();
-  const { wait, waitTimeoutMs } = getWaitOptions(url);
+  const wait = ['1', 'true'].includes(url.searchParams.get('wait') ?? '');
+  const waitTimeoutMs = Number(url.searchParams.get('waitTimeout') ?? WAIT_TIMEOUT_DEFAULT_SECONDS) * 1000;
 
   const contentType = req.headers['content-type'] ?? '';
   let fileBuffer;
@@ -265,10 +228,6 @@ async function route(req, resp, url) {
     });
   }
 
-  if (method === 'POST' && pathname === '/transcribe-url') {
-    return handleTranscribeUrl(req, resp, url);
-  }
-
   if (method === 'POST' && pathname === '/transcribe') {
     return handleTranscribe(req, resp, url);
   }
@@ -344,9 +303,9 @@ async function main() {
   });
   server.listen(PORT, HOST, () => {
     const cookieLoaded = Boolean(getCurrentCookie());
-    console.log(`通义听悟网关已启动: http://${HOST}:${server.address().port}`);
+    console.log(`通义听悟网关已启动: http://${HOST}:${PORT}`);
     console.log(`cookie 状态: ${cookieLoaded ? '已加载' : '未配置 —— 请编辑 cookie.txt 或 POST /cookie'}`);
-    console.log('可用端点: GET /health | POST /cookie | GET /cookie/check | POST /transcribe | POST /transcribe-url | GET /transcripts | GET /transcripts/:id/result | POST /transcripts/:id/export');
+    console.log('可用端点: GET /health | POST /cookie | GET /cookie/check | POST /transcribe | GET /transcripts | GET /transcripts/:id/result | POST /transcripts/:id/export');
   });
 }
 

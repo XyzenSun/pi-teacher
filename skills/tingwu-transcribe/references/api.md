@@ -39,32 +39,10 @@ curl -X POST 'http://127.0.0.1:8787/transcribe?filename=audio.mp3' \
 - 音频：mp3 wav m4a aac amr wma flac ogg opus
 - 视频：mp4 mov avi mkv flv webm 3gp ts（自动按视频任务提交）
 
-## POST /transcribe-url - 听悟服务器下载直链并转写
-
-新增的独立 JSON 入口. 原有 `POST /transcribe` 三种请求方式保持不变.
-
-```bash
-curl -X POST 'http://127.0.0.1:8787/transcribe-url?wait=true' \
-  -H 'content-type: application/json' \
-  -d '{"fileUrl":"https://example.com/video.mp4","showName":"直链转写","roleSplitNum":2}'
-```
-
-- `fileUrl` 必填, 仅支持不含用户名和密码的 `http(s)` 直链. 必须能被听悟服务器公开访问, 不转发源站 Cookie 或自定义下载头.
-- JSON 可选参数: `showName` / `lang` / `roleSplitNum` / `dirId`, 默认值与原入口一致, 但 `showName` 默认使用听悟解析出的文件名 (可能含扩展名).
-- `wait` / `waitTimeout` 与原入口一致. `waitTimeout` 包含服务器下载和转写阶段, 默认 900 秒.
-- 新增 query 参数 `sourceTimeout`, 默认 120 秒, 分别约束解析、提交请求和查找任务三个阶段, 包含 HTTP 请求耗时.
-- 即使 `wait=false`, 也先等解析、提交和任务关联完成再返回 `201` 和 `transId`.
-
-响应字段为 `{transId, taskId, parseTaskId, fileId, showName, fileSize, isVideo, source, status}`. `source` 固定为 `net_source`, `status` 为 `downloading/transcribing/done`. 完成后附 `duration` (秒) 和 `wordCount`. 结果、TXT 和 SRT 复用现有端点.
-
-该入口不下载媒体、不上传 OSS, 失败时不自动回退到旧流程. 类型和大小以听悟元数据为准, 不要求 URL 带媒体扩展名. 解析出零个或多个文件时拒绝提交, 避免意外批量计费.
-
-提交请求或任务关联超时后, 任务可能已经创建. 错误 `detail` 携带 `phase/parseTaskId/fileId/showName`, 请先查询任务列表, 不要直接重试创建. 转写阶段超时携带 `detail.transId`, 可继续查询该任务.
-
 ## GET /transcripts —— 任务列表
 
 查询参数：`pageNo` `pageSize` `status` `showName` `dirId` `orderDesc`。
-转写 status: `0`=完成, `1`=转写中, `3`=已上传待转写, `4`=等待上传/下载, `5`=上传/下载中. `2` 等失败状态需结合 `statusMsg` 排查.
+status 含义：0=转写完成，1=转写中。
 
 ## GET /transcripts/:transId —— 单任务状态
 
@@ -116,14 +94,6 @@ curl -X POST http://127.0.0.1:8787/transcripts/<transId>/export -o out.srt
 | `COOKIE_INVALID` | 401 | 登录已失效，网关已暂停业务请求，需更新 Cookie |
 | `UNSUPPORTED_FORMAT` / `MISSING_EXTENSION` | 400 | 文件扩展名无法识别 |
 | `OSS_UPLOAD_FAILED` | 502 | 上传文件到 OSS 失败 |
-| `INVALID_FILE_URL` / `MISSING_FILE_URL` | 400 | 直链缺失或不是支持的 http(s) URL |
-| `INVALID_JSON` / `INVALID_SHOW_NAME` / `INVALID_TIMEOUT` | 400 | 直链请求参数无效 |
-| `JSON_CONTENT_TYPE_REQUIRED` | 415 | 直链端点只接受 application/json |
-| `NET_SOURCE_FILE_COUNT` | 400 | 直链未解析出恰好一个文件 |
-| `NET_SOURCE_OSS_REQUIRED` | 400 | 听悟要求先绑定 OSS 资源 |
-| `NET_SOURCE_PARSE_FAILED` | 502 | 听悟解析直链失败或返回不完整元数据 |
-| `NET_SOURCE_DOWNLOAD_FAILED` | 502 | 听悟服务器下载失败 |
-| `NET_SOURCE_TASK_AMBIGUOUS` | 502 | 来源标识关联多个任务, 拒绝猜测 transId |
 | `TRANSCRIPTION_FAILED` | 502 | 听悟返回异常任务状态 |
 | `POLL_TIMEOUT` | 504 | 轮询超时，可稍后用 GET /transcripts/:id 再查 |
 | `TINGWU_API_ERROR` | 502 | 听悟接口业务失败（detail 含 tingwuCode/requestId） |
@@ -143,4 +113,4 @@ scripts/ui.html            单文件 WebUI：上传、列表、结果、SRT/TXT�
 
 AI 命令行用法见 [cli.md](cli.md)。
 
-协议来源: 2026-09-02 本地上传抓包, 2026-09-13 直链抓包和官方前端协议核验. 鉴权依赖登录 Cookie, 无 CSRF token、无请求签名, Cookie 需手动维护. 直链协议细节见 [net-source.md](net-source.md).
+协议来源：2026-09-02 浏览器抓包（tingwu.har）逆向分析。鉴权完全依赖登录 Cookie，无 CSRF token、无请求签名，因此 Cookie 需手动维护。
