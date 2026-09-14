@@ -78,6 +78,8 @@ async function main(): Promise<void> {
   let cookie = "";
   const streamControllers: AbortController[] = [];
   const streamTasks: Promise<void>[] = [];
+  // 在 try 内创建、在 finally 清理：临时目录变量必须声明在 try 之外才对 finally 可见
+  let displayDir = "";
 
   // 验证脚本是协议边界，JSON 形状由下面逐条真实断言收窄。
   async function api(method: string, endpoint: string, body?: unknown, authenticated = true) {
@@ -250,12 +252,30 @@ async function main(): Promise<void> {
     check("附件不出现在另一 Pi", (await api("GET", `/api/conversations/${secondRow.id}/attachments`)).json.attachments.length === 0);
     check("@ 文件索引找到真实附件", (await api("GET", `/api/conversations/${id}/file-index?q=${encodeURIComponent("资料")}`)).json.files.includes("files/资料.md"));
 
+    console.log("\n[3b] 图片展示端点（GET /api/images，ADR-0044）");
+    // 图片故意放在 homeDir 与任何会话工作目录之外：端点不限制来源目录是本决策本身
+    displayDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-img-http-"));
+    const displayPngPath = path.join(displayDir, "外部展示图.png");
+    const displayPngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    await fs.writeFile(displayPngPath, displayPngBytes);
+    const displayUrl = `/api/images?p=${encodeURIComponent(displayPngPath)}`;
+    const displayResponse = await fetch(`${baseUrl}${displayUrl}`, { headers: { Cookie: cookie } });
+    check("任意路径位图 200 且字节一致", displayResponse.status === 200 && Buffer.from(await displayResponse.arrayBuffer()).equals(displayPngBytes));
+    check("响应头：magic 认定的 MIME + nosniff + CSP sandbox + inline", displayResponse.headers.get("content-type") === "image/png"
+      && displayResponse.headers.get("x-content-type-options") === "nosniff"
+      && displayResponse.headers.get("content-security-policy") === "default-src 'none'; sandbox"
+      && (displayResponse.headers.get("content-disposition") ?? "").startsWith("inline"));
+    check("非位图一律 404（内容闸门与目录无关）", (await fetch(`${baseUrl}/api/images?p=${encodeURIComponent(path.join(firstRow.work_path, attachment.relativePath))}`, { headers: { Cookie: cookie } })).status === 404);
+    check("不存在的图片 404", (await fetch(`${baseUrl}/api/images?p=${encodeURIComponent(path.join(displayDir, "没有.png"))}`, { headers: { Cookie: cookie } })).status === 404);
+    check("缺 p 参数 400", (await fetch(`${baseUrl}/api/images`, { headers: { Cookie: cookie } })).status === 400);
+    check("未认证 401", (await fetch(`${baseUrl}${displayUrl}`)).status === 401);
+
     console.log("\n[4] SSE 与真实模型制卡");
     const events = openEvents(id);
     await waitFor(() => events.some((event) => event.type === "connected"), "SSE connected", 20_000);
     check("connected 使用业务 ID", events.find((event) => event.type === "connected")?.sessionId === String(id));
     const tools = (await api("POST", `/api/conversations/${id}/command`, { type: "get_tools" })).json.data;
-    check("15 个业务工具真实注册", ["card_propose", "card_list", "card_get", "card_delete", "card_merge", "topic_create", "topic_list", "glossary_propose", "glossary_list", "glossary_get", "review_get_due_cards", "review_submit_ratings", "md_get_outline", "md_get_section", "file_get_size_and_length"].every((name) => tools.some((tool: any) => tool.name === name && tool.active)));
+    check("16 个业务工具真实注册", ["card_propose", "card_list", "card_get", "card_delete", "card_merge", "topic_create", "topic_list", "glossary_propose", "glossary_list", "glossary_get", "review_get_due_cards", "review_submit_ratings", "md_get_outline", "md_get_section", "file_get_size_and_length", "img_display"].every((name) => tools.some((tool: any) => tool.name === name && tool.active)));
     check("set_model 使用已有命令", (await api("POST", `/api/conversations/${id}/command`, { type: "set_model", provider: process.env.PI_TEACHER_PROVIDER, modelId: process.env.PI_TEACHER_MODEL })).status === 200);
     // ADR-0038：非图片附件只在用户消息末尾以一行自然语言告知路径与大小；图片作为图片块发送，不列路径。
     const firstAgent = getSessionWrapper(sessionKeyFor(id))!.inner.agent as unknown as Agent;
@@ -296,6 +316,17 @@ async function main(): Promise<void> {
     check("图片消息落 JSONL 时仍是图片块（与模型能力无关）", (await fs.readFile(firstRow.path, "utf8")).split("\n").filter((line) => line.trim())
       .map((line) => JSON.parse(line) as { type: string; message?: { role?: string; content?: Array<{ type: string; mimeType?: string }> } })
       .some((entry) => entry.type === "message" && entry.message?.role === "user" && (entry.message.content ?? []).some((part) => part.type === "image" && part.mimeType === "image/png")));
+    // img_display 端到端（ADR-0044）：真模型调工具，展示指令经 SSE 与 context 双通道到前端；
+    // onPayload 仍在挂钩中，顺带断言图片字节与 base64 从未进入任何 provider payload
+    const payloadCountBeforeDisplay = firstPayloads.length;
+    await prompt(id, `请实际调用 img_display 工具展示图片，路径 ${displayPngPath}，不要只用文字描述。`);
+    // prompt() 只等到 isRunning 翻 false，SSE 尾部事件可能仍在途；精确等 img_display 的 toolResult 到达
+    await waitFor(() => events.some((event: any) => event.type === "message_end" && event.message?.role === "toolResult" && event.message?.toolName === "img_display"), "img_display 工具结果到达 SSE");
+    const displayToolResult = events.find((event: any) => event.type === "message_end" && event.message?.role === "toolResult" && event.message?.toolName === "img_display");
+    check("模型真实调用 img_display 且 SSE 携带 details.displayImage", displayToolResult?.message?.details?.displayImage?.url === displayUrl);
+    const displayContext = (await api("GET", `/api/conversations/${id}/context`)).json;
+    check("历史重载保留展示指令且 URL 不被 clientView 路径投影改写", displayContext.messages.some((message: any) => message.role === "toolResult" && message.toolName === "img_display" && message.details?.displayImage?.url === displayUrl));
+    check("图片 base64 不进模型上下文（details 是 UI 通道）", firstPayloads.slice(payloadCountBeforeDisplay).every((payload) => !payload.includes(displayPngBytes.toString("base64"))));
     firstAgent.onPayload = firstOriginalOnPayload;
     for (const type of ["agent_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_end", "agent_settled", "prompt_done"]) check(`SSE 收到 ${type}`, events.some((event) => event.type === type));
     const topic = db.prepare("SELECT id FROM topic WHERE name='HTTP验收主题'").get() as { id: number } | undefined;
@@ -817,6 +848,7 @@ async function main(): Promise<void> {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     await fs.rm(homeDir, { recursive: true, force: true });
+    if (displayDir) await fs.rm(displayDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 main().catch((error) => { console.error("HTTP 验收失败：", error instanceof Error ? error.message : "未知错误"); process.exitCode = 1; });

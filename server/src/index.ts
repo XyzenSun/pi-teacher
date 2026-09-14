@@ -13,6 +13,7 @@ import { createAuthRouter } from "./routes/auth.ts";
 import { createWorkspacesRouter } from "./routes/workspaces.ts";
 import { createConversationsRouter } from "./routes/conversations.ts";
 import { createAttachmentsRouter } from "./routes/attachments.ts";
+import { createImagesRouter } from "./routes/images.ts";
 import { renameLegacyAttachmentDirs } from "./session/attachments.ts";
 import { registerSignalHandlers } from "./bridge/agent-session-wrapper.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -78,6 +79,7 @@ export async function buildApp(options: ServerOptions = {}) {
     app.use("/api/workspaces", createWorkspacesRouter(state));
     app.use("/api/conversations/:id", createAttachmentsRouter(state));
     app.use("/api/conversations", createConversationsRouter(state));
+    app.use("/api/images", createImagesRouter());
     app.use("/api/models", createModelsRouter(state));
     app.use("/api/cards", createCardsRouter(state));
     app.use("/api/glossary", createGlossaryRouter(state));

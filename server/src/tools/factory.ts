@@ -4,6 +4,7 @@ import { createCardTopicTools } from "./cards.ts";
 import { createGlossaryTools } from "./glossary.ts";
 import { createReviewTools } from "./review.ts";
 import { createFileTools } from "./files.ts";
+import { createImageTools } from "./images.ts";
 import { buildContextInjection } from "../projection/context-inject.ts";
 
 /**
@@ -39,6 +40,7 @@ export function createPiTeacherExtension(sessionContext: SessionToolContext): In
                 ...createGlossaryTools(sessionContext),
                 ...createReviewTools(sessionContext),
                 ...createFileTools(sessionContext),
+                ...createImageTools(sessionContext),
             ];
             for (const tool of allTools) {
                 pi.registerTool(tool);

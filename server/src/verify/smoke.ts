@@ -11,10 +11,11 @@ import { createCardTopicTools } from "../tools/cards.ts";
 import { createGlossaryTools } from "../tools/glossary.ts";
 import { createReviewTools } from "../tools/review.ts";
 import { createFileTools } from "../tools/files.ts";
+import { createImageTools } from "../tools/images.ts";
 import { toolContextFor, type SessionToolContext } from "../tools/context.ts";
 
 /**
- * 直调冒烟测试：不起模型，直接调工具的 execute，覆盖全部 15 个工具的
+ * 直调冒烟测试：不起模型，直接调工具的 execute，覆盖全部 16 个工具的
  * 正常路径与关键拒绝路径（PRD 验收清单「工具直调冒烟」项）。
  * 测的是真数据库、真文件系统，不涉及 mock；模型驱动路径由 run-real.ts 验证。
  *
@@ -58,6 +59,14 @@ async function callTool(tool: unknown, params: unknown): Promise<string> {
     const result = await execute("smoke-call", params, undefined, undefined, {});
     const first = result.content[0];
     return first?.type === "text" ? (first.text ?? "") : "";
+}
+
+/** 直调但返回完整结果：img_display 的展示指令在 details 里，只看文本会漏掉。 */
+async function callToolFull(tool: unknown, params: unknown): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
+    const execute = (tool as {
+        execute: (...args: unknown[]) => Promise<{ content: Array<{ type: string; text?: string }> ; details: unknown }>;
+    }).execute;
+    return execute("smoke-call", params, undefined, undefined, {});
 }
 
 function byName(tools: ToolDefinition[], name: string): ToolDefinition {
@@ -148,7 +157,8 @@ async function main(): Promise<void> {
         const glossaryTools = createGlossaryTools(learnCtx);
         const reviewTools = createReviewTools(learnCtx);
         const fileTools = createFileTools(learnCtx);
-        const allTools = [...cardTools, ...glossaryTools, ...reviewTools, ...fileTools];
+        const imageTools = createImageTools(learnCtx);
+        const allTools = [...cardTools, ...glossaryTools, ...reviewTools, ...fileTools, ...imageTools];
         // 工厂本身不暴露工具列表（它把工具注册进 pi API），这里只验证构造不抛；
         // 注册正确性由 run-real 的会话工具列表断言负责
         createPiTeacherExtension(learnCtx);
@@ -158,13 +168,14 @@ async function main(): Promise<void> {
             "glossary_propose", "glossary_list", "glossary_get",
             "review_get_due_cards", "review_submit_ratings",
             "md_get_outline", "md_get_section", "file_get_size_and_length",
+            "img_display",
         ];
         check(
-            "15 个工具名单与设计定稿一致",
-            allTools.length === 15 && EXPECTED_TOOLS.every((n) => allTools.some((t) => t.name === n)),
+            "16 个工具名单与设计定稿一致",
+            allTools.length === 16 && EXPECTED_TOOLS.every((n) => allTools.some((t) => t.name === n)),
             allTools.map((t) => t.name),
         );
-        check("工具名无重复", new Set(allTools.map((t) => t.name)).size === 15);
+        check("工具名无重复", new Set(allTools.map((t) => t.name)).size === 16);
         const cardProposeSchema = byName(cardTools, "card_propose").parameters as { properties: Record<string, unknown> };
         check("card_propose 只接受四个业务参数，不再有精华来源路径", JSON.stringify(Object.keys(cardProposeSchema.properties).sort())
             === JSON.stringify(["back", "front", "reason_and_remark", "topic_name"]));
@@ -524,6 +535,43 @@ async function main(): Promise<void> {
         check("只取 10 张且标注剩余", truncated.includes("本次取到 10 张") && /剩余 \d+ 张未取/.test(truncated), truncated.split("\n")[0]);
         const truncatedOverMax = await callTool(byName(reviewTools, "review_get_due_cards"), { nums: 200, topic_id: stressTopicId });
         check("nums 超 100 上限被截到 100", truncatedOverMax.includes("本次取到 100 张"), truncatedOverMax.split("\n")[0]);
+
+        console.log("\n[12] 图片展示（img_display，ADR-0044）");
+        // PNG 魔数开头即可：工具只做 magic 判定，不解析完整图片结构
+        const pngHead = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+        await fs.writeFile(path.join(learnCtx.workPath, "展示图.png"), pngHead);
+        const displayOk = await callToolFull(byName(imageTools, "img_display"), { path: "展示图.png" });
+        const displayOkText = displayOk.content[0]?.type === "text" ? (displayOk.content[0].text ?? "") : "";
+        check(
+            "位图成功：文本确认 + details 带展示指令",
+            displayOkText.includes("已向用户展示图片 展示图.png")
+                && (displayOk.details as { displayImage?: { url?: string } })?.displayImage?.url
+                    === `/api/images?p=${encodeURIComponent(path.join(learnCtx.workPath, "展示图.png"))}`,
+            displayOk,
+        );
+        const displayMissing = await callToolFull(byName(imageTools, "img_display"), { path: "不存在.png" });
+        check("文件不存在拒绝且无展示指令", ((displayMissing.content[0] as { text?: string } | undefined)?.text ?? "").includes("文件不存在或不可读")
+            && (displayMissing.details as { displayImage?: unknown } | null) === null, displayMissing);
+        const displayTextFile = await callToolFull(byName(imageTools, "img_display"), { path: "lesson.md" });
+        check("非位图拒绝（magic 不认，扩展名说了不算）", ((displayTextFile.content[0] as { text?: string } | undefined)?.text ?? "").includes("不是可展示的位图")
+            && (displayTextFile.details as { displayImage?: unknown } | null) === null, displayTextFile);
+        // 核心决策回归：不限制来源目录，工作区外的绝对路径照常展示
+        const imgOutsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-teacher-img-smoke-"));
+        try {
+            const outsidePng = path.join(imgOutsideDir, "外部图.png");
+            await fs.writeFile(outsidePng, pngHead);
+            const displayOutside = await callToolFull(byName(imageTools, "img_display"), { path: outsidePng });
+            check(
+                "工作区外绝对路径照常展示（不限制目录）",
+                (displayOutside.details as { displayImage?: { url?: string } })?.displayImage?.url
+                    === `/api/images?p=${encodeURIComponent(outsidePng)}`,
+                displayOutside,
+            );
+        } finally {
+            await fs.rm(imgOutsideDir, { recursive: true, force: true }).catch(() => {});
+        }
+        await fs.writeFile(path.join(learnCtx.workPath, "假图.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        check("SVG 拒绝（能执行的图片格式不进展示通道）", (await callTool(byName(imageTools, "img_display"), { path: "假图.svg" })).includes("不是可展示的位图"));
 
         console.log(`\n结果：${passed} 通过，${failed} 失败`);
     } finally {

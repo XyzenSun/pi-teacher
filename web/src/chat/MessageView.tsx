@@ -8,6 +8,7 @@ const TOOL_LABELS: Record<string, string> = {
   glossary_propose: "提议术语", glossary_list: "查看术语", read_file: "读取文件", write_file: "写入文件",
   edit_file: "编辑文件", list_dir: "浏览目录", web_search: "网络搜索", web_fetch: "抓取网页",
   review_queue: "获取复习队列", review_submit_ratings: "提交复习评分", bash: "执行命令",
+  img_display: "展示图片",
 };
 
 function previewValue(value: unknown, max = 80): string {
@@ -40,37 +41,53 @@ function Collapsible({ summary, tone = "default", defaultOpen = false, children 
   );
 }
 
+/** img_display 的展示指令（与 server/src/tools/images.ts 的 details 结构对应）。 */
+interface DisplayImage { url: string; name: string; mimeType: string; size: number }
+function displayImageOf(result: ToolResultMessage | undefined): DisplayImage | null {
+  const details = result?.details as { displayImage?: DisplayImage } | null | undefined;
+  return details?.displayImage ?? null;
+}
+
 function ToolCallView({ block, result, execution }: { block: ToolCallContent; result?: ToolResultMessage; execution?: ToolExecution }) {
   const label = TOOL_LABELS[block.toolName] ?? block.toolName;
   const firstParam = Object.entries(block.input)[0];
   const paramsPreview = block.rawInput !== undefined && !Object.keys(block.input).length ? previewValue(block.rawInput) : firstParam ? `${firstParam[0]}: ${previewValue(firstParam[1])}` : "";
   const running = !result && (execution?.running ?? false);
   const tone = result?.isError ? "error" : "default";
+  // 图片展示指令不藏在折叠块里：工具卡片照常可折叠看参数，图本身始终可见
+  const displayImage = displayImageOf(result);
   return (
-    <Collapsible tone={tone} summary={(
-      <span className="flex items-center gap-2">
-        <span className={`icon text-[16px] ${result?.isError ? "text-error" : "text-secondary"}`}>{running ? "progress_activity" : result?.isError ? "error" : "build"}</span>
-        <span className="font-medium text-primary">{label}</span>
-        {paramsPreview && <span className="font-mono text-[12px] text-muted truncate">{paramsPreview}</span>}
-        {running && <span className="chip bg-secondary-container text-on-secondary-container">执行中</span>}
-        {result?.isError && <span className="chip bg-error-container text-on-error-container">失败</span>}
-      </span>
-    )}>
-      <div className="space-y-2">
-        <div>
-          <div className="label mb-1">参数</div>
-          <pre className="font-mono text-[12px] bg-surface-container-low rounded p-2 overflow-auto max-h-60 whitespace-pre-wrap break-all">{Object.keys(block.input).length ? stringifyPretty(block.input) : block.rawInput ?? ""}</pre>
-        </div>
-        {(result || execution?.partialResult !== undefined) && (
+    <div>
+      <Collapsible tone={tone} summary={(
+        <span className="flex items-center gap-2">
+          <span className={`icon text-[16px] ${result?.isError ? "text-error" : "text-secondary"}`}>{running ? "progress_activity" : result?.isError ? "error" : "build"}</span>
+          <span className="font-medium text-primary">{label}</span>
+          {paramsPreview && <span className="font-mono text-[12px] text-muted truncate">{paramsPreview}</span>}
+          {running && <span className="chip bg-secondary-container text-on-secondary-container">执行中</span>}
+          {result?.isError && <span className="chip bg-error-container text-on-error-container">失败</span>}
+        </span>
+      )}>
+        <div className="space-y-2">
           <div>
-            <div className="label mb-1">{result ? (result.isError ? "错误" : "结果") : "实时输出"}</div>
-            <pre className={`font-mono text-[12px] rounded p-2 overflow-auto max-h-80 whitespace-pre-wrap break-words ${result?.isError ? "bg-error-container/60 text-on-error-container" : "bg-surface-container-low"}`}>
-              {result ? resultText(result) : stringifyPretty(execution?.partialResult)}
-            </pre>
+            <div className="label mb-1">参数</div>
+            <pre className="font-mono text-[12px] bg-surface-container-low rounded p-2 overflow-auto max-h-60 whitespace-pre-wrap break-all">{Object.keys(block.input).length ? stringifyPretty(block.input) : block.rawInput ?? ""}</pre>
           </div>
-        )}
-      </div>
-    </Collapsible>
+          {(result || execution?.partialResult !== undefined) && (
+            <div>
+              <div className="label mb-1">{result ? (result.isError ? "错误" : "结果") : "实时输出"}</div>
+              <pre className={`font-mono text-[12px] rounded p-2 overflow-auto max-h-80 whitespace-pre-wrap break-words ${result?.isError ? "bg-error-container/60 text-on-error-container" : "bg-surface-container-low"}`}>
+                {result ? resultText(result) : stringifyPretty(execution?.partialResult)}
+              </pre>
+            </div>
+          )}
+        </div>
+      </Collapsible>
+      {displayImage && (
+        <a href={displayImage.url} target="_blank" rel="noopener noreferrer" className="block my-1.5">
+          <img src={displayImage.url} alt={displayImage.name} loading="lazy" className="max-w-full sm:max-w-[480px] rounded-md border border-line bg-surface-container-lowest" />
+        </a>
+      )}
+    </div>
   );
 }
 
