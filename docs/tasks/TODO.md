@@ -1,6 +1,14 @@
 # TODO
 
-## 本阶段：图片展示能力（已实现，待用户 WebUI 验收）
+## 本阶段：compact 命令入口与图片灯箱（已实现，待用户 WebUI 验收）
+
+**compact-command-entry（2026-09-14）**：PRD 见 `compact-command-entry.md`。根因：Pi 原生命令是 TUI 层的，RPC `get_commands` 只返回 extension/模板/skill，且 prompt 只展开后两者——后端 `{type:"compact"}` 链路其实全通，唯一缺 UI 入口。实现（纯前端，后端零改动）：`native-commands.ts` 静态白名单（compact 常驻、abort_compaction 仅压缩中）合并进 `/` 菜单、重名时原生命令优先；ChatInput 提交时在 prompt/steer 分流前解析原生命令（避免运行中被 steer 成字面文本），支持 `/compact 保留代码示例` 后缀作 customInstructions；useConversation 补 compaction_start/end 事件处理（isCompacting 运行态 + 压缩后 refreshContext，历史含 compaction 摘要条目）。
+
+**image-lightbox（2026-09-14）**：PRD 见 `image-lightbox.md`。img_display 展示形态由方案 A（常显大图 + 新开原图）改为方案 C（ADR-0044 状态补充）：150px 缩略图 + yet-another-react-lightbox 灯箱（MIT、零依赖、React 16.8–19），启用 Zoom / Download 插件；主题用库的 CSS 变量对齐 Atelier Mind（styles.css，必须放在库样式 @import 之后）。范围仅 img_display 展示图，用户上传附件维持现状。验证：typecheck + build 通过（新依赖进主 bundle，增量约 12kB gzip）。
+
+两项均待浏览器验收：`/compact` 菜单出现、带参执行、压缩中 abort、压缩后历史刷新、运行中提交得 409 文案；img_display 出缩略图、灯箱缩放/下载/Esc 关闭、刷新后行为一致。
+
+## 本阶段：图片展示能力（已实现，用户 WebUI 验收通过）
 
 **image-display（2026-09-14）**：PRD 即本文件与 ADR-0044。生图 skill 落盘后前端无法显示图片的问题：新增 `img_display(path)` 工具（magic 认证位图、≤16MB，展示指令走 `details.displayImage` UI 通道，不进模型上下文）与新端点 `GET /api/images?p=<percent-encoded 绝对路径>`（不限制来源目录，只回 magic 位图，密钥/配置非位图出不去）；前端 ToolCallView 在折叠卡外常显 <img>（方案 A，四案 HTML 对比稿在 `docs/前端模板/图片展示形态对比.html`，用户拍板）。工具面 15→16（新前缀组 `img_*`，全部会话可用）。验证：typecheck 双过、smoke 96/0、lifecycle 18/0、http-smoke 535/0/0（octopus / deepseek-normal-latest，含真模型端到端调 img_display 与 SSE / 历史重载双通道断言）；本机默认模型 agnes 无凭据，验证需显式传 `PI_TEACHER_PROVIDER=octopus PI_TEACHER_MODEL=deepseek-normal-latest`。待做：用户浏览器验收；create-img-generate-skill 模板已提示新接入的生图 provider 生成后调 img_display。
 

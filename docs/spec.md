@@ -182,3 +182,8 @@ bug影响与触发条件: 连续多轮后台跑同名日志的验证脚本，且
 bug原因: `projection/client-view.ts` 对所有出口字符串做字面子串替换（`/root/… → ~/…`、work_path → `.`）。img_display 的展示指令里若放裸绝对路径（`/api/images?p=/root/pi-teacher/…png`），`/root/` 前缀会被替换成 `~/`，浏览器请求一个不存在的路径；`encodeURIComponent` 之后子串不再匹配，投影不碰它。
 bug影响与触发条件: 任何把服务端绝对路径拼进 URL 下发给前端的场景（图片展示是第一个）；症状是图 404 且 URL 里出现 `~/`。
 解决方法: 路径进 URL 前一律 `encodeURIComponent`（`server/src/tools/images.ts`）；http-smoke 有断言钉住「历史重载后 URL 不被投影改写」。
+
+### Pi 原生命令不进 RPC 的 get_commands，/ 菜单看不到 compact 是数据源问题不是命令缺失
+bug原因: Pi 的 `BUILTIN_SLASH_COMMANDS`（compact/model/export 等 22 个）是 TUI 交互层命令；RPC 模式的 `get_commands` 只返回 extension 注册命令 + prompt 模板 + skill 三类（rpc-mode.js 的 get_commands case）。且 SDK 的 `prompt()/steer()/followUp()` 只展开 skill 与模板命令，把 `/compact` 当消息发会被模型当普通文本。
+bug影响与触发条件: 任何「前端 `/` 菜单只吃 get_commands」的实现都永远看不到原生命令；症状是后端命令面完整（`{type:"compact"}` 全通）但界面无入口。
+解决方法: 前端维护「WebUI 支持的原生命令」静态白名单合并进菜单（`web/src/chat/native-commands.ts`），提交时在 prompt/steer 分流之前解析并改走命令通道——否则运行中的 `/compact` 会被 steer 成字面文本。另：压缩事件（compaction_start/end）bridge 全量转发但前端要自己处理，压缩后必须 refreshContext（历史被改写为 compaction 摘要条目）。
