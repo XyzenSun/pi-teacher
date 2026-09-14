@@ -1,5 +1,9 @@
 # TODO
 
+## 本阶段：图片展示能力（已实现，待用户 WebUI 验收）
+
+**image-display（2026-09-14）**：PRD 即本文件与 ADR-0044。生图 skill 落盘后前端无法显示图片的问题：新增 `img_display(path)` 工具（magic 认证位图、≤16MB，展示指令走 `details.displayImage` UI 通道，不进模型上下文）与新端点 `GET /api/images?p=<percent-encoded 绝对路径>`（不限制来源目录，只回 magic 位图，密钥/配置非位图出不去）；前端 ToolCallView 在折叠卡外常显 <img>（方案 A，四案 HTML 对比稿在 `docs/前端模板/图片展示形态对比.html`，用户拍板）。工具面 15→16（新前缀组 `img_*`，全部会话可用）。验证：typecheck 双过、smoke 96/0、lifecycle 18/0、http-smoke 535/0/0（octopus / deepseek-normal-latest，含真模型端到端调 img_display 与 SSE / 历史重载双通道断言）；本机默认模型 agnes 无凭据，验证需显式传 `PI_TEACHER_PROVIDER=octopus PI_TEACHER_MODEL=deepseek-normal-latest`。待做：用户浏览器验收；create-img-generate-skill 模板已提示新接入的生图 provider 生成后调 img_display。
+
 ## 本阶段：两个新任务立项（2026-09-13，待实施）
 
 **prompt-and-skill-polish（提示词优化与 skill 完善）**：PRD 见 `prompt-and-skill-polish.md`。两个子目标：① sbx 源码从上游 `sandbox-cli` 仓库转入 `skills/sbx/sourcecode/`，**权威转移**（用户已定：上游归档，本仓库成为唯一源），分发保持 esbuild 单文件 node cli，决策记 ADR-0043 并给 ADR-0040 补状态行；② 提示词优化——**围绕使用痛点**（用户已定范围，痛点清单待用户补充），提示词面为 `defaults.ts` 六类常量 + 五个 SKILL.md，每条痛点定位到具体提示词段、改点确认后再动手。

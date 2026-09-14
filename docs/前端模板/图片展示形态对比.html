@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>img_display 展示形态对比稿</title>
+<style>
+  /* Atelier Mind 令牌（web/src/styles.css 同源），离线可用：字体走系统回退 */
+  :root {
+    --surface: #f9f9f8;
+    --surface-container-lowest: #ffffff;
+    --surface-container-low: #f3f4f2;
+    --surface-container: #edeeed;
+    --on-surface: #1a1c1b;
+    --on-surface-variant: #44474a;
+    --muted: #8a8e94;
+    --primary: #1e252b;
+    --on-primary: #ffffff;
+    --secondary: #456558;
+    --secondary-container: #c7ebda;
+    --on-secondary-container: #2d4d41;
+    --line: #e5e2dc;
+    --outline-variant: #d4cfc7;
+    --font-body: "Inter", system-ui, sans-serif;
+    --font-reading: "Newsreader", Georgia, serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface); color: var(--on-surface);
+    font-family: var(--font-body); font-size: 14px; line-height: 1.6;
+  }
+  .page-head { max-width: 760px; margin: 0 auto; padding: 40px 20px 8px; }
+  .page-head h1 { font-family: var(--font-reading); font-weight: 500; font-size: 26px; margin: 0 0 8px; }
+  .page-head p { color: var(--on-surface-variant); margin: 0; }
+  .page-head code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-container-low); padding: 1px 5px; border-radius: 4px; }
+
+  .option { max-width: 760px; margin: 28px auto; padding: 0 20px; }
+  .option-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .option-tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    background: var(--primary); color: var(--on-primary); border-radius: 4px; padding: 2px 8px;
+  }
+  .option-head h2 { font-family: var(--font-reading); font-weight: 500; font-size: 19px; margin: 0; }
+  .cur {
+    font-size: 11px; border-radius: 4px; padding: 2px 8px;
+    background: var(--secondary-container); color: var(--on-secondary-container); font-weight: 500;
+  }
+  .notcur { font-size: 11px; color: var(--muted); border: 1px solid var(--outline-variant); border-radius: 4px; padding: 2px 8px; }
+
+  /* 对话面板：模拟真实聊天列（浅色卡面在纸白底上） */
+  .chat {
+    background: var(--surface-container-lowest); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: 0 1px 2px rgba(30,37,43,0.04);
+    padding: 20px 24px; max-width: 700px;
+  }
+  .msg-user {
+    display: flex; justify-content: flex-end; margin-bottom: 16px;
+  }
+  .msg-user span {
+    background: var(--primary); color: var(--on-primary);
+    border-radius: 12px; border-top-right-radius: 4px;
+    padding: 9px 15px; max-width: 80%; font-size: 14px;
+  }
+  .msg-assistant { max-width: 100%; }
+  .prose { font-family: var(--font-reading); font-size: 15.5px; line-height: 1.65; margin-top: 10px; }
+  .prose p { margin: 0.75em 0 0; }
+
+  /* 工具折叠卡（MessageView 的 Collapsible 同形态） */
+  .toolcard {
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface-container-lowest); font-size: 13px; margin: 6px 0;
+  }
+  .toolcard-head {
+    width: 100%; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; text-align: left; cursor: pointer;
+    background: none; border: none; font: inherit; color: inherit;
+  }
+  .toolcard-head:hover { background: var(--surface-container-low); border-radius: 10px; }
+  .chev { color: var(--muted); width: 16px; text-align: center; font-size: 13px; }
+  .tool-name { font-weight: 500; }
+  .tool-param {
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px;
+  }
+  .toolcard-body { border-top: 1px solid var(--line); padding: 4px 12px 12px; display: none; }
+  .toolcard.open .toolcard-body { display: block; }
+  .toolcard.open .chev::before { content: "▾"; }
+  .toolcard:not(.open) .chev::before { content: "▸"; }
+  .label { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: var(--on-surface-variant); margin: 10px 0 4px; }
+  pre {
+    font-family: var(--font-mono); font-size: 12px; background: var(--surface-container-low);
+    border-radius: 6px; padding: 8px; margin: 0; white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* 图片占位（SVG 由脚本注入，模拟生图产物） */
+  .imgph svg { display: block; width: 100%; height: auto; border-radius: 8px; }
+  .img-full { display: block; max-width: 480px; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
+  .img-inline { display: block; max-width: 420px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; }
+  .img-thumb { width: 150px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; padding: 0; background: none; display: block; margin: 8px 0; }
+  .img-in-card { max-width: 420px; margin: 10px 0 2px; border: 1px solid var(--line); border-radius: 8px; }
+
+  /* 灯箱（方案 C） */
+  .lightbox {
+    position: fixed; inset: 0; background: rgba(20, 24, 28, 0.82);
+    display: none; align-items: center; justify-content: center; z-index: 50; cursor: zoom-out;
+  }
+  .lightbox.show { display: flex; }
+  .lightbox .imgph { max-width: min(86vw, 760px); max-height: 86vh; }
+  .lightbox .imgph svg { border-radius: 10px; }
+  .lb-caption { position: absolute; bottom: 26px; left: 0; right: 0; text-align: center; color: #e6e8ea; font-size: 13px; }
+
+  .notes { max-width: 700px; margin: 12px 0 0; padding-left: 20px; color: var(--on-surface-variant); font-size: 13px; }
+  .notes li { margin: 3px 0; }
+  .notes .good::marker { color: var(--secondary); }
+  .notes .bad::marker { color: #ba1a1a; }
+
+  table.cmp {
+    max-width: 760px; margin: 8px auto 60px; border-collapse: collapse; font-size: 13px;
+    background: var(--surface-container-lowest);
+  }
+  table.cmp th, table.cmp td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { background: var(--surface-container-low); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; max-width: 700px; }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>img_display 展示形态对比稿</h1>
+  <p>背景：模型调用 <code>img_display(path)</code> 后，图片以什么形态出现在对话里。下面四个方案都在真实设计令牌下绘制，折叠与灯箱交互可真实点击体验。图片为占位 SVG（模拟生图产物「牛顿苹果」）。</p>
+</header>
+
+<!-- ================= 方案 A ================= -->
+<section class="option" id="a">
+  <div class="option-head">
+    <span class="option-tag">方案 A</span>
+    <h2>工具卡下方常显大图</h2>
+    <span class="cur">当前代码已实现</span>
+  </div>
+  <div class="chat">
+    <div class="msg-user"><span>帮我画一张牛顿在苹果树下思考的图</span></div>
+    <div class="msg-assistant">
+      <div class="toolcard">
+        <button class="toolcard-head" type="button">
+          <span class="chev"></span>
+          <span class="tool-name">展示图片</span>
+          <span class="tool-param">path: llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c….png</span>
+        </button>
+        <div class="toolcard-body">
+          <div class="label">参数</div>
+          <pre>{ "path": "llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c-….png" }</pre>
+          <div class="label">结果</div>
+          <pre>已向用户展示图片 2026-09-14-(牛顿苹果)-3f2a1b8c-….png（image/png，2.2 MB）。</pre>
+        </div>
+      </div>
+      <a class="img-full imgph" href="#" onclick="return false" title="点击新开原图（当前实现）"></a>
+      <div class="prose">
+        <p>图已经生成好啦。牛顿在苹果树下的这个瞬间，是物理学史上最著名的思想实验场景之一——注意他手里拿着的正是那颗「落下来的苹果」。</p>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li class="good">图必然可见：不依赖模型写对 Markdown，展示指令由工具 details 通道结构化下发。</li>
+    <li class="good">位置固定：图钉在工具调用处，历史重载、SSE 流式两条路径渲染一致。</li>
+    <li class="bad">图与正文分离：阅读顺序是「工具卡 → 图 → 讲解」，图不嵌在行文里。</li>
+    <li class="bad">大图占屏：一屏一张 480px 图，连续多图时纵向拉得很长。</li>
+  </ul>
+</section>
+
+<!-- ================= 方案 B ================= -->
+<section class="option" id="b">
+  <div class="option-head">
+    <span class="option-tag">方案 B</span>
+    <h2>正文内联（Markdown 图）</h2>
+    <span class="notcur">未实现</span>
+  </div>
+  <div class="chat">
+    <div class="msg-user"><span>帮我画一张牛顿在苹果树下思考的图</span></div>
+    <div class="msg-assistant">
+      <div class="prose" style="margin-top:0">
+        <p>好嘞，图画好了。牛顿在苹果树下的经典一幕：</p>
+      </div>
+      <a class="img-inline imgph" href="#" onclick="return false"></a>
+      <div class="prose">
+        <p>这张图抓住了「灵光一现」的瞬间——传说中那颗落下的苹果，正是万有引力思想的起点。要不要我把它记进本节的学习精华里？</p>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li class="good">阅读最自然：图嵌在行文流里，模型可以「图前铺垫一句、图后总结一句」。</li>
+    <li class="bad">依赖模型把 URL 写对：路径必须 percent-encode，且 SSE 投影会把绝对路径字面量改写成 <code>~/</code> 前缀，模型手拼 URL 极易拼出死链。</li>
+    <li class="bad">需要动提示词面：教模型「何时写图、怎么写 URL」；工具路线则不需要。</li>
+    <li class="bad">位置随模型排版漂移：同一张图每次生成的位置可能不同。</li>
+  </ul>
+</section>
+
+<!-- ================= 方案 C ================= -->
+<section class="option" id="c">
+  <div class="option-head">
+    <span class="option-tag">方案 C</span>
+    <h2>缩略图 + 点击放大（灯箱）</h2>
+    <span class="notcur">未实现</span>
+  </div>
+  <div class="chat">
+    <div class="msg-user"><span>帮我画一张牛顿在苹果树下思考的图</span></div>
+    <div class="msg-assistant">
+      <div class="toolcard">
+        <button class="toolcard-head" type="button">
+          <span class="chev"></span>
+          <span class="tool-name">展示图片</span>
+          <span class="tool-param">path: llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c….png</span>
+        </button>
+        <div class="toolcard-body">
+          <div class="label">参数</div>
+          <pre>{ "path": "llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c-….png" }</pre>
+          <div class="label">结果</div>
+          <pre>已向用户展示图片 2026-09-14-(牛顿苹果)-3f2a1b8c-….png（image/png，2.2 MB）。</pre>
+        </div>
+      </div>
+      <button class="img-thumb imgph" type="button" title="点击放大预览（试试）"></button>
+      <div class="prose">
+        <p>图已生成，点缩略图可以放大看细节。牛顿手里的苹果、树影和月光都画进去了。</p>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li class="good">省空间：150px 缩略图一行一张，多图场景可横向排成条。</li>
+    <li class="good">想看再放大：灯箱在原位覆盖展开，不打断阅读位置。</li>
+    <li class="bad">多一层交互：看图必须多点一下（学习场景里图常是「记忆锚点」，多半还是要放大看）。</li>
+    <li class="bad">灯箱是新前端组件：遮罩、关闭、Esc 键、滚动锁，实现面比 A 大。</li>
+  </ul>
+  <p class="hint">↑ 缩略图真的可以点：会弹出灯箱预览，点击遮罩关闭。</p>
+</section>
+
+<!-- ================= 方案 D ================= -->
+<section class="option" id="d">
+  <div class="option-head">
+    <span class="option-tag">方案 D</span>
+    <h2>收进工具折叠卡（默认不可见）</h2>
+    <span class="notcur">未实现 · 仅作对照</span>
+  </div>
+  <div class="chat">
+    <div class="msg-user"><span>帮我画一张牛顿在苹果树下思考的图</span></div>
+    <div class="msg-assistant">
+      <p class="hint" style="margin:0 0 6px">默认状态（收起，图不可见）：</p>
+      <div class="toolcard">
+        <button class="toolcard-head" type="button">
+          <span class="chev"></span>
+          <span class="tool-name">展示图片</span>
+          <span class="tool-param">path: llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c….png</span>
+        </button>
+        <div class="toolcard-body">
+          <div class="label">参数</div>
+          <pre>{ "path": "llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c-….png" }</pre>
+          <div class="label">结果</div>
+          <pre>已向用户展示图片 2026-09-14-(牛顿苹果)-3f2a1b8c-….png（image/png，2.2 MB）。</pre>
+        </div>
+      </div>
+      <p class="hint" style="margin:14px 0 6px">展开后（图在卡片内部）：</p>
+      <div class="toolcard open">
+        <button class="toolcard-head" type="button">
+          <span class="chev"></span>
+          <span class="tool-name">展示图片</span>
+          <span class="tool-param">path: llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c….png</span>
+        </button>
+        <div class="toolcard-body">
+          <div class="label">参数</div>
+          <pre>{ "path": "llm-text-to-img/2026-09-14-(牛顿苹果)-3f2a1b8c-….png" }</pre>
+          <div class="label">结果</div>
+          <pre>已向用户展示图片 2026-09-14-(牛顿苹果)-3f2a1b8c-….png（image/png，2.2 MB）。</pre>
+          <div class="label">展示</div>
+          <div class="img-in-card imgph"></div>
+        </div>
+      </div>
+      <div class="prose">
+        <p>图已生成（在上方工具卡里展开查看）。</p>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li class="good">界面最干净：工具调用与产物全部收进卡片，正文只有文字。</li>
+    <li class="bad">违背「展示」初衷：模型调 img_display 的目的就是让用户看见图，默认收起等于没展示。</li>
+    <li class="bad">历史回看时容易误以为图丢了。</li>
+  </ul>
+</section>
+
+<!-- 灯箱（方案 C 用） -->
+<div class="lightbox" id="lightbox">
+  <div class="imgph"></div>
+  <div class="lb-caption">2026-09-14-(牛顿苹果)-3f2a1b8c-….png · 点击任意处关闭</div>
+</div>
+
+<!-- 汇总表 -->
+<table class="cmp">
+  <thead>
+    <tr><th>方案</th><th>图默认可见</th><th>图嵌正文</th><th>实现面</th><th>可靠性</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A 工具卡下常显大图</td><td>是</td><td>否（图在卡与正文之间）</td><td>小（已实现）</td><td>高（结构化 details 通道）</td></tr>
+    <tr><td>B 正文内联 Markdown</td><td>是</td><td>是</td><td>中（提示词 + 投影改写问题）</td><td>低（模型手拼 URL 易死链）</td></tr>
+    <tr><td>C 缩略图 + 灯箱</td><td>缩略图可见</td><td>否</td><td>中（新灯箱组件）</td><td>高（同 A）</td></tr>
+    <tr><td>D 收进折叠卡</td><td>否</td><td>否</td><td>最小</td><td>高，但语义不成立</td></tr>
+  </tbody>
+</table>
+
+<script>
+  // 占位图：模拟生图产物（牛顿苹果），SVG 内联避免外链
+  const APPLE_SVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="牛顿苹果占位图">
+    <defs>
+      <radialGradient id="bg" cx="50%" cy="32%" r="85%">
+        <stop offset="0%" stop-color="#3d4f61"/><stop offset="100%" stop-color="#12181f"/>
+      </radialGradient>
+      <radialGradient id="apple" cx="36%" cy="30%" r="80%">
+        <stop offset="0%" stop-color="#e86a4c"/><stop offset="100%" stop-color="#9c2817"/>
+      </radialGradient>
+      <linearGradient id="moon" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f4e9d0"/><stop offset="100%" stop-color="#d9c9a3"/>
+      </linearGradient>
+    </defs>
+    <rect width="400" height="400" fill="url(#bg)"/>
+    <circle cx="316" cy="70" r="26" fill="url(#moon)"/>
+    <circle cx="306" cy="62" r="4" fill="#c9b88f" opacity="0.5"/><circle cx="324" cy="80" r="3" fill="#c9b88f" opacity="0.4"/>
+    <g fill="#dfe6ee">
+      <circle cx="60" cy="56" r="1.6" opacity="0.9"/><circle cx="120" cy="34" r="1.2" opacity="0.7"/>
+      <circle cx="180" cy="66" r="1.4" opacity="0.8"/><circle cx="250" cy="40" r="1.1" opacity="0.6"/>
+      <circle cx="40" cy="120" r="1.3" opacity="0.7"/><circle cx="360" cy="140" r="1.4" opacity="0.8"/>
+      <circle cx="90" cy="180" r="1.1" opacity="0.5"/><circle cx="330" cy="230" r="1.2" opacity="0.6"/>
+    </g>
+    <path d="M60 400 Q120 250 210 236 Q300 250 360 400 Z" fill="#0c1117" opacity="0.85"/>
+    <path d="M96 400 Q150 300 208 292 Q266 300 320 400 Z" fill="#16202a" opacity="0.9"/>
+    <g>
+      <path d="M208 292 q10 -46 34 -60" stroke="#513a24" stroke-width="8" fill="none" stroke-linecap="round"/>
+      <path d="M242 232 q34 -20 54 -2 q-24 26 -54 2z" fill="#4d7a4f"/>
+      <circle cx="200" cy="330" r="52" fill="url(#apple)"/>
+      <ellipse cx="182" cy="312" rx="10" ry="14" fill="#ffffff" opacity="0.22"/>
+    </g>
+    <g stroke="#e6e8ea" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.9">
+      <path d="M150 118 q26 -18 52 -6"/><path d="M158 132 q22 -14 44 -4"/>
+    </g>
+    <g transform="translate(292 118)">
+      <circle cx="0" cy="0" r="17" fill="none" stroke="#e6e8ea" stroke-width="3" opacity="0.92"/>
+      <path d="M-6 -2 q6 -8 12 0" stroke="#e6e8ea" stroke-width="2.4" fill="none"/>
+      <circle cx="-6" cy="-4" r="1.6" fill="#e6e8ea"/><circle cx="6" cy="-4" r="1.6" fill="#e6e8ea"/>
+    </g>
+  </svg>`;
+  document.querySelectorAll(".imgph").forEach((el) => { el.innerHTML = APPLE_SVG; });
+
+  // 折叠卡开关
+  document.querySelectorAll(".toolcard-head").forEach((head) => {
+    head.addEventListener("click", () => head.closest(".toolcard").classList.toggle("open"));
+  });
+
+  // 灯箱：缩略图打开、点遮罩关闭、Esc 关闭
+  const lightbox = document.getElementById("lightbox");
+  document.querySelectorAll(".img-thumb").forEach((thumb) => {
+    thumb.addEventListener("click", (event) => { event.stopPropagation(); lightbox.classList.add("show"); });
+  });
+  lightbox.addEventListener("click", () => lightbox.classList.remove("show"));
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") lightbox.classList.remove("show"); });
+</script>
+</body>
+</html>

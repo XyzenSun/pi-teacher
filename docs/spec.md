@@ -177,3 +177,8 @@ bug影响与触发条件: 任何「改了后端代码但只重启了前端（或
 bug原因: 用 `(setsid npm run http-smoke > log &)` 起的验证进程不受外层 bash 超时影响；外层超时后进程继续跑，最终把失败写进日志文件。下一轮验证用 `>` 截断同名日志时，残留进程仍持有旧句柄按原偏移写入——新日志里出现「上一轮的失败」，看起来像新代码失败。
 bug影响与触发条件: 连续多轮后台跑同名日志的验证脚本，且前一轮因模型慢等原因超时未结束。
 解决方法: 起下一轮前 `pkill -f <脚本名>` 确认清场，或每轮用不同日志文件名；判断真假失败以「断言计数 + 进程存活 + 耗时是否合理」交叉验证（180 秒的 waitFor 不可能 30 秒超时）。
+
+### 展示类 URL 里的文件路径必须 percent-encode，否则被 clientView 路径投影改写成死链
+bug原因: `projection/client-view.ts` 对所有出口字符串做字面子串替换（`/root/… → ~/…`、work_path → `.`）。img_display 的展示指令里若放裸绝对路径（`/api/images?p=/root/pi-teacher/…png`），`/root/` 前缀会被替换成 `~/`，浏览器请求一个不存在的路径；`encodeURIComponent` 之后子串不再匹配，投影不碰它。
+bug影响与触发条件: 任何把服务端绝对路径拼进 URL 下发给前端的场景（图片展示是第一个）；症状是图 404 且 URL 里出现 `~/`。
+解决方法: 路径进 URL 前一律 `encodeURIComponent`（`server/src/tools/images.ts`）；http-smoke 有断言钉住「历史重载后 URL 不被投影改写」。

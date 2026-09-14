@@ -52,8 +52,9 @@ function toPublicAttachment(meta: AttachmentMeta): Pick<
 /**
  * Content-Disposition 的 filename：ASCII 回退（去掉引号与非 ASCII）+ RFC 5987 的
  * `filename*`，中文名在现代浏览器保存为原名，老浏览器也不会因为裸 UTF-8 头出错。
+ * 导出供图片展示路由复用：同一份文件名转义逻辑不写两遍。
  */
-function contentDispositionValue(disposition: "attachment" | "inline", name: string): string {
+export function contentDispositionValue(disposition: "attachment" | "inline", name: string): string {
   const asciiFallback = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }

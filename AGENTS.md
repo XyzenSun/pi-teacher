@@ -17,7 +17,7 @@ pi-teacher/
     src/index.ts                ← 启动入口：homeDir、端口、env 同步
     src/bridge/                 ← Pi SDK 桥接：AgentSessionWrapper（准入串行化、空闲回收）
     src/session/                ← 会话仓储、附件、模型目录、标题生成
-    src/tools/                  ← Pi 插件工厂 + 15 个业务工具（card_/topic_/glossary_/review_/md_/file_）
+    src/tools/                  ← Pi 插件工厂 + 16 个业务工具（card_/topic_/glossary_/review_/md_/file_/img_）
     src/projection/             ← 开会话时把 agents_md / teach_style 投影为工作目录文件
     src/db/ src/fsrs/           ← better-sqlite3 schema 与 ts-fsrs 调度
     src/routes/ src/auth/       ← HTTP 形状与单用户密码鉴权
@@ -32,7 +32,7 @@ pi-teacher/
     adr/                        ← 决策记录 0001–0042（0002 已被 0013 取代并删除），冲突时以编号大者为准
     tasks/TODO.md               ← 阶段状态与待办；tasks/*.md 为各阶段 PRD
     spec.md                     ← 踩坑经验库（只 grep `### ` 标题，禁止整读）
-    工具定义.md                  ← 15 个工具的签名、可见性矩阵、返回形态
+    工具定义.md                  ← 16 个工具的签名、可见性矩阵、返回形态
     前端模板/                    ← 设计稿与配色（改视觉前看 DESIGN.md）
     THIRD-PARTY-NOTICES.md      ← 自 pi-web 移植代码的许可声明
     deploy.md                   ← Docker 部署：挂载变量、内置 skill 覆盖规则、升级、备份、常见错误

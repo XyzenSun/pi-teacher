@@ -10,7 +10,7 @@ import { toolContextFor } from "../tools/context.ts";
 /**
  * 真模型验证（PRD 验收清单核心项）：
  * 真实临时 SQLite + 真实目录 → 数据库建 Space/Pi Session 记录 → 进程内走
- * bridge 层建 Pi 会话（startWorkspaceSession）→ 15 个工具注册 → 真实对话让
+ * bridge 层建 Pi 会话（startWorkspaceSession）→ 16 个工具注册 → 真实对话让
  * 模型调 topic_create + card_propose → 断言数据库出现对应行、JSONL 落盘、
  * bridge 事件可达。
  *
@@ -52,6 +52,7 @@ const EXPECTED_TOOLS = [
     "glossary_propose", "glossary_list", "glossary_get",
     "review_get_due_cards", "review_submit_ratings",
     "md_get_outline", "md_get_section", "file_get_size_and_length",
+    "img_display",
 ];
 
 async function main(): Promise<void> {
@@ -129,11 +130,11 @@ async function main(): Promise<void> {
             }
         });
 
-        // —— 命令表 get_tools：15 工具必须全部注册且 active ——
+        // —— 命令表 get_tools：全部工具必须注册且 active ——
         const toolsResult = await wrapper.send({ type: "get_tools" }) as Array<{ name: string; active: boolean }>;
         const activeToolNames = toolsResult.filter((t) => t.active).map((t) => t.name);
         const missingTools = EXPECTED_TOOLS.filter((t) => !activeToolNames.includes(t));
-        check(`15 个 pi-teacher 工具全部注册且 active（共 ${activeToolNames.length} 个可用）`, missingTools.length === 0, {
+        check(`${EXPECTED_TOOLS.length} 个 pi-teacher 工具全部注册且 active（共 ${activeToolNames.length} 个可用）`, missingTools.length === 0, {
             missingTools, activeToolNames,
         });
 
