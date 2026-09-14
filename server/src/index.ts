@@ -44,10 +44,10 @@ export async function buildApp(options: ServerOptions = {}) {
   const db = openDatabase(options.dbPath ?? path.join(dataDir, "pi-teacher.db"));
   try {
     initializeSchema(db, homeDir);
-    // 旧部署的 attachments/ 一次性改名为 files/（ADR-0038），必须早于任何上传与会话打开。
+    // 旧部署的 attachments/ 一次性改名为 files/，必须早于任何上传与会话打开。
     const migratedDirs = renameLegacyAttachmentDirs(db);
     if (migratedDirs.renamed) console.log(`[attachments] 已把 ${migratedDirs.renamed} 个会话的 attachments/ 改名为 files/`);
-    // 用户环境变量进 process.env 要早于任何会话创建：skill 子进程靠继承拿值（ADR-0034）。
+    // 用户环境变量进 process.env 要早于任何会话创建：skill 子进程靠继承拿值。
     const imported = bootstrapUserEnv(db, homeDir);
     if (imported.fromEnv.length) console.log(`[user-env] 已从环境变量首次导入：${imported.fromEnv.join("、")}`);
     if (imported.fromDotenv.length) console.log(`[user-env] 已从 .env 首次导入：${imported.fromDotenv.join("、")}（该文件不再被读取，可删除）`);

@@ -5,13 +5,13 @@ import { assertToolAllowed, type SessionToolContext } from "./context.ts";
 /**
  * card_* 与 topic_* 工具组：制卡相关（提议、增删查改、合并、Topic 管理）。
  *
- * 设计约束（docs/工具定义.md）：
- * - 模型无物理增删权，只有状态提案权（ADR-0005）：propose 固定写 'proposed'
+ * 设计约束：
+ * - 模型无物理增删权，只有状态提案权：propose 固定写 'proposed'
  * - 时间戳由代码填（schema DEFAULT），工具参数里不出现时间字段
  * - 返回值给原料不给结论：拒绝时附 front 列表让模型自己判断下一步
  */
 
-/** 归一化去重（ADR-0017）：精确匹配归代码，语义判断归模型。 */
+/** 归一化去重：精确匹配归代码，语义判断归模型。 */
 function normalizeFront(front: string): string {
     return front
         .trim()

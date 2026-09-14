@@ -8,11 +8,11 @@
  * - AGENTS_MD_TEMPLATES、TEACH_STYLE_TEMPLATES
  *     → seed.seedApplication 插入 agents_md / teach_style 表（只在表里没有该类型 / 为空时）
  * - REMINDER_TEXT_DEFAULTS
- *     → setting 表缺行时维护提醒的默认文案（ADR-0036）；用户在设置页改过就以表为准
+ *     → setting 表缺行时维护提醒的默认文案；用户在设置页改过就以表为准
  */
 import type { SpaceType } from "../db/types.ts";
 
-/** 全局规则：由 Pi 祖先目录遍历自动进入每个会话的 system prompt（ADR-0029 / ADR-0033）。 */
+/** 全局规则：由 Pi 祖先目录遍历自动进入每个会话的 system prompt。 */
 export const GLOBAL_AGENTS_MD = `# Pi Teacher 全局规则
 
 你是 Pi 老师，一位专业的教师。你的任务是教会用户知识，而不是替用户编码或开发程序。所有自然语言回复使用中文；术语、代码、命令、文件名与正在学习的外文内容保留原文。
@@ -80,7 +80,7 @@ export interface AgentsMdTemplate {
 
 /**
  * 三类会话模板。只写本类型的职责；跨类型的通用规则（语言、不编造、目录维护、制卡开关与
- * Topic 归属）在 GLOBAL_AGENTS_MD。助教固定占 agents_md.id = 0，且只能有一条（ADR-0035）。
+ * Topic 归属）在 GLOBAL_AGENTS_MD。助教固定占 agents_md.id = 0，且只能有一条。
  */
 export const AGENTS_MD_TEMPLATES: Record<SpaceType, AgentsMdTemplate> = {
   ta: {
@@ -149,7 +149,7 @@ export const TEACH_STYLE_TEMPLATES: readonly TeachStyleTemplate[] = [
   { name: "启发式追问", description: "用适量问题引导思考", prompt: "每次只提出一个有助于理解的问题，等待用户回答；用户要求直接解释时不强行追问。" },
 ];
 
-/** 三段基础提醒与学习专属精华段（ADR-0036 / ADR-0039）：整段拼在用户消息末尾，含标签。 */
+/** 三段基础提醒与学习专属精华段：整段拼在用户消息末尾，含标签。 */
 export type ReminderKind = "makeCardOn" | "makeCardOff" | "ta" | "learningEssence";
 
 export const REMINDER_TEXT_DEFAULTS: Record<ReminderKind, string> = {
@@ -157,7 +157,7 @@ export const REMINDER_TEXT_DEFAULTS: Record<ReminderKind, string> = {
   makeCardOn: `<system-reminder>已与用户对话多轮，可以考虑更新用户偏好、用户信息与制卡。如果当前会话下用户针对本次会话提出了要求，而不是全局性要求你以后在其他任务也这么做，更新到 pi-session-user.md。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`,
   /** 学习 / 复习会话且制卡关闭：不提制卡。 */
   makeCardOff: `<system-reminder>已与用户对话多轮，可以考虑更新用户偏好、用户信息。如果当前会话下用户针对本次会话提出了要求，而不是全局性要求你以后在其他任务也这么做，更新到 pi-session-user.md。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`,
-  /** 助教不维护全局偏好与用户信息（ADR-0035），只维护「用户对你的要求」。 */
+  /** 助教不维护全局偏好与用户信息，只维护「用户对你的要求」。 */
   ta: `<system-reminder>已与用户对话多轮，可以考虑更新用户对你的要求，更新到 pi-session-user.md。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`,
   /** 仅学习会话与基础提醒同轮追加，制卡开关不影响精华维护。 */
   learningEssence: `<system-reminder>可以考虑维护当前学习会话的 essence/ 学习精华：按需阅读已有精华，围绕已确认的关键知识、易错点和有效解题方法补充或修订，避免重复与对话流水账。是否需要更新以及更新什么由你判断，不必每次提醒都写文件。此消息为系统提醒，如果你认为不需要维护，在回复用户时无需提及本消息</system-reminder>`,

@@ -178,7 +178,7 @@ export interface PiSettingsView {
   retry: RetrySettingsView;
 }
 
-/** 基础三段文案按类型与制卡开关选取；学习会话同轮追加精华段（ADR-0036 / ADR-0039）。 */
+/** 基础三段文案按类型与制卡开关选取；学习会话同轮追加精华段。 */
 export type ReminderKind = "makeCardOn" | "makeCardOff" | "ta" | "learningEssence";
 
 export interface AppSettingsView {
@@ -199,7 +199,7 @@ export interface PiSettingsResponse { settings: PiSettingsView; app: AppSettings
 export type HomeMarkdownKind = "user-preferences" | "global-agents-md";
 export interface HomeMarkdownResponse { content: string; path: string }
 
-/** 用户环境变量（ADR-0034）：明文存储、明文回显；内置项未设置也在列，此时没有 value。 */
+/** 用户环境变量：明文存储、明文回显；内置项未设置也在列，此时没有 value。 */
 export interface UserEnvItem {
   key: string;
   builtin: boolean;

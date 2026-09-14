@@ -11,8 +11,8 @@ import type { SessionToolContext } from "./context.ts";
  * 「某标题下到哪里为止」的边界计算——这算术交给模型是负担且易错。
  * 行号与 Pi 自带 read 的 offset/limit 组合使用，是组合关系不是替代。
  *
- * 相对路径基于当前 Pi Session 的 workPath 解析。按 ADR-0030 不实现应用级
- * 文件沙箱；容器与远程执行 skill 负责系统边界，HTTP 附件接口单独限制路径。
+ * 相对路径基于当前 Pi Session 的 workPath 解析。不实现应用级文件沙箱：
+ * 沙箱是部署层职责，系统边界由容器与远程执行 skill 负责，HTTP 附件接口单独限制路径。
  */
 
 function toolResult(text: string): { content: Array<{ type: "text"; text: string }>; details: null } {

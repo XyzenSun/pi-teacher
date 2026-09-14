@@ -1,5 +1,4 @@
-// 基于 pi-web v0.9.0 lib/rpc-manager.ts 裁剪重写（MIT License，上游 2067 行
-// → 本文件约 600 行）。裁剪对照见 PRD backend-host-mvp 附录：
+// 基于 pi-web v0.9.0 lib/rpc-manager.ts 
 //   砍——subagent 全套、扩展 UI widget/custom-ui-terminal、web-push、
 //        project-trust、startup-preferences、model-scope、PlainTextTheme/
 //        TuiKeybindingsManager（pi-tui 依赖随 ask_user 一并移除）、
@@ -28,7 +27,7 @@ type AgentRunCompleteListener = (sessionId: string) => void;
 export interface AgentSessionWrapperOptions {
   /** 标题生成等「首轮完成后」的钩子（pi-web 用于 web-push，这里给事件 hub） */
   onAgentRunComplete?: AgentRunCompleteListener;
-  /** 常驻：不设空闲计时器，只随进程 SIGTERM / SIGINT 或显式 shutdown 关闭（固定助教，ADR-0035）。 */
+  /** 常驻：不设空闲计时器，只随进程 SIGTERM / SIGINT 或显式 shutdown 关闭（固定助教挂在侧栏，冷启动成本不该压在「顺手问一句」上）。 */
   resident?: boolean;
 }
 
@@ -167,7 +166,7 @@ export class AgentSessionWrapper {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    // 常驻会话（固定助教）只随进程退出或显式 shutdown 关闭，从不设空闲计时器（ADR-0035）。
+    // 常驻会话（固定助教）只随进程退出或显式 shutdown 关闭，从不设空闲计时器：回收后下一次要等真实 SDK 会话重建，成本不可接受。
     if (!this._alive || this.resident) return;
     if (!this.isRunning()) this.forceShutdownOnIdle = false;
     this.idleTimer = setTimeout(() => {
@@ -474,7 +473,7 @@ export class AgentSessionWrapper {
 }
 
 // ============================================================================
-// 会话注册表（模块级 Map，ADR-0024 简化决定，不用 globalThis）
+// 会话注册表（模块级 Map：单进程宿主内共享即可。参考实现挂 globalThis 只因 Next.js dev 热重载会重建模块，Express 无此问题，故用普通模块变量）
 // ============================================================================
 
 const sessionRegistry = new Map<string, AgentSessionWrapper>();
@@ -491,7 +490,7 @@ export function registerSignalHandlers(): void {
   const shutdownAll = (signal: NodeJS.Signals) => {
     // 双 key 注册会让同一 wrapper 出现两次：按对象去重，shutdown/destroy 幂等但别重复跑
     const sessions = Array.from(new Set(sessionRegistry.values()));
-    // 容器 stop 只给 10 秒宽限期：这一行是运维判断「优雅退出确实走到了」的依据（docs/deploy.md）。
+    // 容器 stop 只给进程 10 秒宽限期，日志里出现这一行即证明「优雅退出确实走到了」（排障时拿它做判据）。
     console.log(`[bridge] 收到 ${signal}，先向 ${sessions.length} 个会话发 session_shutdown 再退出`);
     void Promise.allSettled(sessions.map((session) => session.shutdown())).then(() => {
       // Node 无法在 exit handler 里 await，这里同步收尾作为最后兜底
@@ -538,7 +537,7 @@ export function getSessionWrapper(sessionId: string): AgentSessionWrapper | unde
 /**
  * 创建或复用一个工作区会话。与 pi-web 的关键差异（PRD 实现要点 1/2）：
  * - cwd 契约：SessionManager.create(工作区目录, 工作区目录)，jsonl 平铺
- *   在工作区目录，祖先遍历使全局 AGENTS.md 自动注入（ADR-0029）
+ *   在工作区目录，全局 AGENTS.md 靠 Pi 的祖先目录发现自动注入系统提示词
  * - resourceLoaderOptions 全开（生产宿主：skills、context files 都要装），
  *   扩展工厂注入 createPiTeacherExtension（SessionToolContext 闭包捕获）
  */
@@ -562,8 +561,8 @@ export async function startWorkspaceSession(
       : SessionManager.create(workspaceDir, workspaceDir, { id: sessionKey });
     const agentDir = getAgentDir();
     const settingsManager = SettingsManager.create(workspaceDir, agentDir);
-    // 全局 USER.md + 会话 style.md 在会话构造时读一次（ADR-0031：切换风格靠 reload 重读）；
-    // 会话级引导块无条件附带，所以 appendSystemPrompt 总是有内容（ADR-0036）。
+    // 全局 USER.md + 会话 style.md 在会话构造时读一次（appendSystemPrompt 只在构造时生效，切换风格靠重开会话重读）；
+    // 会话级引导块无条件附带，所以 appendSystemPrompt 总是有内容（让模型知道 pi-session-user.md 是什么）。
     const appendedSystemPrompt = buildAppendedSystemPrompt(options.homeDir, workspaceDir);
     const services = await createAgentSessionServices({
       cwd: workspaceDir,

@@ -85,7 +85,7 @@ export function createAuthRouter(db: Database.Database): Router {
   });
 
   // PATCH /api/auth/username —— 改名同样要验当前密码：cookie 被盗时不能让攻击者
-  // 悄悄改掉账号标识。单用户模型下只操作 user 表唯一那一行（ADR-0022）。
+  // 悄悄改掉账号标识。单用户模型下只操作 user 表唯一那一行。
   router.patch("/username", requireAuth, async (req: Request, res: Response) => {
     const { username, currentPassword } = req.body as { username?: unknown; currentPassword?: unknown };
     if (typeof username !== "string" || !username.trim() || username.trim().length > 100) {

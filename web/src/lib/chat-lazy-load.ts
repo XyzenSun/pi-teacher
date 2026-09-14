@@ -1,5 +1,5 @@
-// 移植自 pi-web v0.9.0（MIT License，https://github.com/agegr/pi-web）lib/chat-lazy-load.ts。
-// 原始版权与许可见本仓库 docs/THIRD-PARTY-NOTICES.md。
+// 移植自 pi-web v0.9.0（MIT License，Copyright (c) 2026 agegr，
+// https://github.com/agegr/pi-web）lib/chat-lazy-load.ts。
 export const VISIBLE_PAGE_SIZE = 50;
 export const CHAT_SCROLL_TAIL_TOLERANCE = 8;
 export const CHAT_SCROLL_REATTACH_TOLERANCE = 96;

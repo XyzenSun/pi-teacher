@@ -2,11 +2,10 @@ import type Database from "better-sqlite3";
 import { seedApplication } from "./seed.ts";
 
 /**
- * 建表与初始化数据，schema 以 docs/数据库与目录结构设计.md 为准。
+ * 建表与初始化数据。这里的 CREATE TABLE 即当前 schema 的唯一权威定义。
  *
- * 注意：FSRS 的 learning_steps/relearning_steps 由代码固定为 []（关多步学习，
- * 见该文档 topic 表说明），不建列——ts-fsrs 的 Card.learning_steps 恒为 0，
- * 映射层直接丢弃该字段。
+ * 注意：FSRS 的 learning_steps/relearning_steps 由代码固定为 []（关多步学习），
+ * 不建列——ts-fsrs 的 Card.learning_steps 恒为 0，映射层直接丢弃该字段。
  */
 
 const CREATE_TABLES = `
@@ -151,14 +150,14 @@ CREATE TABLE IF NOT EXISTS glossary (
   CHECK (status IN ('proposed', 'normal', 'deleted'))
 );
 
--- 用户环境变量（ADR-0034）：启动与保存时注入后端 process.env，供模型调用的 skill 子进程继承。
+-- 用户环境变量：启动与保存时注入后端 process.env，供模型调用的 skill 子进程继承。
 -- 明文存储、明文回显：单用户本机部署，库本身不加密，不再区分隐藏值。
 CREATE TABLE IF NOT EXISTS user_env (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
--- pi-teacher 自己的业务运行设置（ADR-0036 / ADR-0039），与 Pi 的 settings.json 无关。
+-- pi-teacher 自己的业务运行设置，与 Pi 的 settings.json 无关。
 -- 存维护提醒共用间隔与文案；缺行即取代码默认值，不需要 seed。
 CREATE TABLE IF NOT EXISTS setting (
   key   TEXT PRIMARY KEY,
@@ -173,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_card_topic_status
 `;
 
 /**
- * ADR-0030 不兼容更早的 session 表模型，仍要求显式重建；当前 schema 的独立字段
+ * 更早的 session 表模型与当前 schema 不兼容，检测到就要求显式重建；当前 schema 的独立字段
  * 变更在建表后幂等迁移，不重建卡片或删除文件。user 表保持空表直到 setup。
  */
 export function initializeSchema(db: Database.Database, homeDir: string): void {
@@ -196,7 +195,7 @@ function dropUserEnvSecretColumn(db: Database.Database): void {
   if (columns.some((column) => column.name === "secret")) db.exec("ALTER TABLE user_env DROP COLUMN secret");
 }
 
-/** 卡片与精华解耦（ADR-0039）：仅删旧来源列，卡片、调度、复习日志及精华文件都保留。 */
+/** 卡片与精华解耦：仅删旧来源列 source_essence_path，卡片、调度、复习日志及精华文件都保留。 */
 function dropCardSourceEssencePath(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(card)").all() as Array<{ name: string }>;
   if (columns.some((column) => column.name === "source_essence_path")) db.exec("ALTER TABLE card DROP COLUMN source_essence_path");

@@ -6,7 +6,7 @@ import { buildAtInsertText, buildEntriesFromFiles, extractAtQuery, filterFileEnt
 /** 草稿按对话 ID 存内存：切换会话再切回来不丢输入，刷新页面则按后端历史重建。 */
 const drafts = new Map<number, string>();
 
-/** 单次发送的附件数量上限，与后端 attachmentIds 的上限一致（ADR-0038：任意类型）。 */
+/** 单次发送的附件数量上限，与后端 attachmentIds 的上限一致（附件不限类型）。 */
 const MAX_ATTACHMENTS = 8;
 
 interface ChatInputProps {
@@ -202,7 +202,7 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, contr
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => { composingRef.current = false; compositionEndAtRef.current = Date.now(); }}
           onPaste={(event) => {
-            // 粘贴的文件（截图、从文件管理器复制的文档）一律作为附件上传，不限类型（ADR-0038）。
+            // 粘贴的文件（截图、从文件管理器复制的文档）一律作为附件上传，不限类型。
             const files = Array.from(event.clipboardData.files);
             if (files.length) { event.preventDefault(); void uploadFiles(files); }
           }}

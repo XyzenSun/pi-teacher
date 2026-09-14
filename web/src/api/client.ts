@@ -110,9 +110,9 @@ export const conversationsApi = {
   context: (id: number, options: { tail?: number; before?: string } = {}) => request<SessionContext>(`/api/conversations/${id}/context${query(options)}`),
   command: <T = unknown>(id: number, command: SessionCommand) => request<{ success: true; data: T }>(`/api/conversations/${id}/command`, json("POST", command)),
   close: (id: number) => request<{ success: true }>(`/api/conversations/${id}/close`, json("POST")),
-  /** 只对助教有效（ADR-0035）：换新 JSONL 并常驻重开；工作目录与 pi-session-user.md 不动。 */
+  /** 只对助教有效：换新 JSONL 并常驻重开；工作目录与 pi-session-user.md 不动。 */
   clear: (id: number) => request<{ success: true; conversation: Conversation; runtime: Runtime }>(`/api/conversations/${id}/clear`, json("POST")),
-  /** 真删除（ADR-0037）：行与 JSONL 一起删，工作目录保留；助教 403。 */
+  /** 真删除：行与 JSONL 一起删，工作目录保留；助教 403。 */
   remove: (id: number) => request<{ success: true; filesRetained: true }>(`/api/conversations/${id}`, { method: "DELETE" }),
   eventsUrl: (id: number) => `/api/conversations/${id}/events`,
   fileIndex: (id: number, q: string) => request<{ files: string[]; truncated: boolean }>(`/api/conversations/${id}/file-index${query({ q })}`),

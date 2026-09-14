@@ -120,7 +120,7 @@ export function createInitialSchedule(
  * 批量提交判定：对每张卡跑 fsrs().next() 并落库。
  *
  * 单事务：要么全部判定落库，要么全部回滚——批量判定是一个原子业务动作
- * （ADR-0018 复习是批量对话），半批落库会让 due 队列与 review_log 失配。
+ * （复习是一场批量对话），半批落库会让 due 队列与 review_log 失配。
  *
  * rating 文字档（Again/Hard/Good/Easy）与 ts-fsrs 枚举值的映射直接查表，
  * 不做 parse——非法值在工具参数校验层就该被 TypeBox 拒掉。

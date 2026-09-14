@@ -59,7 +59,7 @@ async function openConversation(state: AppState, row: PiSessionRow): Promise<voi
   if (!existsSync(row.path)) throw new HttpError(409, "Pi Session 的历史文件缺失，不能自动创建替代会话");
   // 旧学习会话随正常打开补齐精华目录，不启动全盘扫描，也不改动已有精华。
   ensureLearningEssenceDirectory(row.work_path, row.space_type);
-  // 固定助教常驻（ADR-0035）：首次访问时打开，之后不参与空闲回收；学习 / 复习会话维持回收策略。
+  // 固定助教常驻：首次访问时打开，之后不参与空闲回收；学习 / 复习会话维持十分钟回收策略。
   await startWorkspaceSession(sessionKeyFor(row.id), row.work_path, toolContextFor(state.db, row), {
     sessionFile: row.path, homeDir: state.homeDir, resident: row.space_type === "ta",
   });
@@ -169,7 +169,7 @@ export function createConversationsRouter(state: AppState): Router {
   });
 
   /**
-   * 教学风格可在对话进行中切换（ADR-0031）。风格通过 appendSystemPrompt 进入会话，
+   * 教学风格可在对话进行中切换。风格通过 appendSystemPrompt 进入会话，
    * 而 appendSystemPrompt 只在会话构造时读取，所以必须落库 + 重投影 style.md +
    * 按稳定 ID 重开同一 JSONL。历史、模型与 pi_session.id 都不变。
    */
@@ -238,12 +238,12 @@ export function createConversationsRouter(state: AppState): Router {
       if (!message && !attachments.length) throw new HttpError(400, "消息与附件不能同时为空");
       if (message.length > 100_000) throw new HttpError(400, "单条输入最多 100,000 个字符");
       command.type = "prompt";
-      // 会话文件（ADR-0038）：图片作为图片块随消息发送；其余文件只在文本里告诉模型路径与大小。
+      // 会话文件：图片作为图片块随消息发送；其余文件只在文本里告诉模型路径与大小。
       const images = attachments.filter(isImageAttachment);
       const filesNote = describeNonImageAttachments(attachments);
       // 用户只发图片不写字时文本块会是空串，anthropic-messages 会丢弃空 text block，兜底一句说明。
       const text = message || filesNote ? message : `用户发送了 ${images.length} 张图片。`;
-      // 维护提醒（ADR-0036 / ADR-0039）：轮次 = 活动分支上已有 user 消息数 + 1，命中后组合基础
+      // 维护提醒：轮次 = 活动分支上已有 user 消息数 + 1，命中后组合基础
       // 文案与学习专属精华段；共用一个间隔，制卡开关从数据库现读，避免闭包快照得到假开关。
       const turn = countUserTurns(wrapper.inner.sessionManager.getBranch() as unknown as SessionEntry[]) + 1;
       const { reminderIntervalTurns, reminderTexts } = readAppSettings(state.db);
@@ -301,7 +301,7 @@ export function createConversationsRouter(state: AppState): Router {
   });
 
   /**
-   * 真删除（ADR-0037）：行与 JSONL 一起删，工作目录保留（用户产出与上传文件）。
+   * 真删除：行与 JSONL 一起删，工作目录保留（用户产出与上传文件）。
    * 运行中的回复先 abort 再 shutdown，用户已在界面确认过，不再用 409 挡。
    */
   router.delete("/:id", async (req, res) => {
@@ -313,7 +313,7 @@ export function createConversationsRouter(state: AppState): Router {
   });
 
   /**
-   * 助教清除对话（ADR-0035）：换一个只含 header 的新 JSONL，然后按同一稳定 ID 重开为常驻会话。
+   * 助教清除对话：换一个只含 header 的新 JSONL，然后按同一稳定 ID 重开为常驻会话。
    * 工作目录、pi-session-user.md 与上传的文件一律不动；旧 JSONL 删除失败只记日志——
    * 孤儿历史文件与保留的工作目录同类，不值得为它回滚已经切换的路径。
    */
