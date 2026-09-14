@@ -1,4 +1,7 @@
 import { Component, memo, useState, type ReactNode } from "react";
+import Lightbox from "yet-another-react-lightbox";
+import Zoom from "yet-another-react-lightbox/plugins/zoom";
+import Download from "yet-another-react-lightbox/plugins/download";
 import type { AgentMessage, AssistantMessage, ToolCallContent, ToolResultMessage, UserMessage } from "../api/types.ts";
 import { Markdown } from "./Markdown.tsx";
 import type { ToolExecution } from "./useConversation.ts";
@@ -54,8 +57,9 @@ function ToolCallView({ block, result, execution }: { block: ToolCallContent; re
   const paramsPreview = block.rawInput !== undefined && !Object.keys(block.input).length ? previewValue(block.rawInput) : firstParam ? `${firstParam[0]}: ${previewValue(firstParam[1])}` : "";
   const running = !result && (execution?.running ?? false);
   const tone = result?.isError ? "error" : "default";
-  // 图片展示指令不藏在折叠块里：工具卡片照常可折叠看参数，图本身始终可见
+  // 图片展示指令不藏在折叠块里：工具卡片照常可折叠看参数；图默认 150px 缩略图，点击灯箱放大
   const displayImage = displayImageOf(result);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   return (
     <div>
       <Collapsible tone={tone} summary={(
@@ -83,9 +87,17 @@ function ToolCallView({ block, result, execution }: { block: ToolCallContent; re
         </div>
       </Collapsible>
       {displayImage && (
-        <a href={displayImage.url} target="_blank" rel="noopener noreferrer" className="block my-1.5">
-          <img src={displayImage.url} alt={displayImage.name} loading="lazy" className="max-w-full sm:max-w-[480px] rounded-md border border-line bg-surface-container-lowest" />
-        </a>
+        <>
+          <button type="button" title="点击放大" className="block my-1.5" onClick={() => setLightboxOpen(true)}>
+            <img src={displayImage.url} alt={displayImage.name} loading="lazy" className="w-[150px] rounded-md border border-line bg-surface-container-lowest" />
+          </button>
+          <Lightbox
+            open={lightboxOpen}
+            close={() => setLightboxOpen(false)}
+            slides={[{ src: displayImage.url, alt: displayImage.name }]}
+            plugins={[Zoom, Download]}
+          />
+        </>
       )}
     </div>
   );
