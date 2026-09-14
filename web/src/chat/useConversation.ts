@@ -130,6 +130,15 @@ export function useConversation(conversationId: number | null) {
           setRuntime((current) => current ? { ...current, isRunning: false, isStreaming: false } : current);
           void refreshContext(id);
           break;
+        case "compaction_start":
+          setRuntime((current) => current ? { ...current, isCompacting: true } : current);
+          break;
+        case "compaction_end":
+        case "auto_compaction_end":
+          // 压缩把历史改写为 compaction 摘要条目，必须重拉 context；isCompacting 同步复位
+          setRuntime((current) => current ? { ...current, isCompacting: false } : current);
+          void refreshContext(id);
+          break;
         case "prompt_error":
           setError(typeof event.errorMessage === "string" ? event.errorMessage : "模型运行出错");
           break;

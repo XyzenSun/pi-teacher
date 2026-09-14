@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { conversationsApi } from "../api/client.ts";
 import type { Attachment, SlashCommand } from "../api/types.ts";
 import { buildAtInsertText, buildEntriesFromFiles, extractAtQuery, filterFileEntries, type FileIndexEntry } from "../lib/file-fuzzy.ts";
+import { parseNativeCommand } from "./native-commands.ts";
 
 /** 草稿按对话 ID 存内存：切换会话再切回来不丢输入，刷新页面则按后端历史重建。 */
 const drafts = new Map<number, string>();
@@ -20,10 +21,12 @@ interface ChatInputProps {
   modelSelector?: ReactNode;
   onSend: (message: string, attachmentIds: string[]) => Promise<void>;
   onSteer: (message: string) => Promise<void>;
+  /** 提交文本是原生命令（/compact 等）时走命令通道，不发 prompt 也不 steer。 */
+  onNativeCommand: (name: string, args: string) => Promise<void>;
   onAbort: () => void;
 }
 
-export function ChatInput({ conversationId, disabled, isRunning, commands, controls, modelSelector, onSend, onSteer, onAbort }: ChatInputProps) {
+export function ChatInput({ conversationId, disabled, isRunning, commands, controls, modelSelector, onSend, onSteer, onNativeCommand, onAbort }: ChatInputProps) {
   const [value, setValue] = useState(() => drafts.get(conversationId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -113,8 +116,15 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, contr
     setError(null);
     const attachmentIds = attachments.map((attachment) => attachment.id);
     try {
-      if (isRunning && !followUpMode) await onSteer(message);
-      else await onSend(message, attachmentIds);
+      // 原生命令优先于 prompt/steer 分流：否则运行中的 /compact 会被 steer 成字面文本发给模型
+      const native = parseNativeCommand(message);
+      if (native) {
+        await onNativeCommand(native.name, native.args);
+      } else if (isRunning && !followUpMode) {
+        await onSteer(message);
+      } else {
+        await onSend(message, attachmentIds);
+      }
       setValue("");
       setAttachments([]);
       drafts.delete(conversationId);
@@ -123,7 +133,7 @@ export function ChatInput({ conversationId, disabled, isRunning, commands, contr
     } finally {
       setBusy(false);
     }
-  }, [attachments, conversationId, followUpMode, isRunning, onSend, onSteer, value]);
+  }, [attachments, conversationId, followUpMode, isRunning, onSend, onSteer, onNativeCommand, value]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && !composingRef.current) {

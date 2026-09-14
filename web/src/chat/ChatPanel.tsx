@@ -6,6 +6,7 @@ import { MessageView } from "./MessageView.tsx";
 import { ModelSelector, SessionControlBar } from "./SessionControls.tsx";
 import { InlineEdit } from "../ui/Overlays.tsx";
 import { indexToolResults, RECYCLED_MESSAGE, type ConnectionStatus } from "./useConversation.ts";
+import { nativeCommandsFor } from "./native-commands.ts";
 import type { useConversation } from "./useConversation.ts";
 
 const STATUS_TEXT: Record<ConnectionStatus, string> = {
@@ -141,7 +142,12 @@ export function ChatPanel({ conversationId, title, session, models, onRenamed }:
         conversationId={conversationId}
         disabled={status === "recycled" || status === "closed"}
         isRunning={isRunning}
-        commands={commands}
+        commands={useMemo(() => {
+          // 原生命令与 get_commands 结果合并；重名时原生命令优先（与 Pi TUI 优先级一致）
+          const native = nativeCommandsFor(runtime);
+          const nativeNames = new Set(native.map((command) => command.name));
+          return [...native, ...commands.filter((command) => !nativeNames.has(command.name))];
+        }, [commands, runtime])}
         controls={<SessionControlBar conversation={conversation} isRunning={isRunning} onChanged={refreshConversation} />}
         modelSelector={
           <ModelSelector
@@ -154,6 +160,10 @@ export function ChatPanel({ conversationId, title, session, models, onRenamed }:
         }
         onSend={async (message, attachmentIds) => { followRef.current = true; await sendCommand({ type: "prompt", message, attachmentIds }); }}
         onSteer={async (message) => { followRef.current = true; await sendCommand({ type: "steer", message }); }}
+        onNativeCommand={async (name, args) => {
+          if (name === "compact") await sendCommand({ type: "compact", customInstructions: args || undefined });
+          else if (name === "abort_compaction") await sendCommand({ type: "abort_compaction" });
+        }}
         onAbort={() => { void sendCommand({ type: "abort" }); }}
       />
     </section>
